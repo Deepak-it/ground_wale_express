@@ -32,6 +32,7 @@ function normalizeRole(value) {
   }
 
   if (
+    role === 'owner' ||
     role === 'box_cricket_owner' ||
     role === 'box' ||
     role === 'box cricket' ||
@@ -39,11 +40,11 @@ function normalizeRole(value) {
     role === 'boxcricket' ||
     role === 'box-cricket'
   ) {
-    return 'box_cricket_owner';
+    return 'owner';
   }
 
   if (role === 'academy_owner' || role === 'academy' || role === 'coach') {
-    return 'academy_owner';
+    return 'owner';
   }
 
   if (
@@ -53,7 +54,7 @@ function normalizeRole(value) {
     role === 'turf' ||
     role === 'turf_owner'
   ) {
-    return 'ground_owner';
+    return 'owner';
   }
 
   if (
@@ -79,8 +80,8 @@ const userSchema = new mongoose.Schema(
     mapLocation: { type: String, trim: true },
     role: {
       type: String,
-      enum: ['ground_owner', 'player', 'academy_owner', 'box_cricket_owner'],
-      default: 'ground_owner',
+      enum: ['owner', 'player'],
+      default: 'owner',
       set: normalizeRole,
     },
     isCaptain: { type: Boolean, default: false },

@@ -1,5 +1,6 @@
 const mongoose = require('mongoose');
 
+const Academy = require('../models/Academy');
 const AcademyBatch = require('../models/AcademyBatch');
 const AcademyStudent = require('../models/AcademyStudent');
 const AcademyFee = require('../models/AcademyFee');
@@ -18,6 +19,45 @@ function toObjectId(value, fieldName) {
 function normalizeDay(value) {
   const date = value ? new Date(value) : new Date();
   return new Date(date.getFullYear(), date.getMonth(), date.getDate());
+}
+
+function academyIdFromRequest(req) {
+  const raw = req.query.academyId || req.body?.academyId;
+  if (!raw) {
+    return null;
+  }
+  if (!mongoose.Types.ObjectId.isValid(raw)) {
+    throw httpError(400, 'Invalid academyId');
+  }
+  return new mongoose.Types.ObjectId(raw);
+}
+
+async function ensureDefaultAcademy(ownerId) {
+  const existing = await Academy.findOne({ ownerId }).sort({ createdAt: 1 });
+  if (existing) {
+    return existing;
+  }
+  return Academy.create({
+    ownerId,
+    name: 'Main Academy',
+    status: 'active',
+  });
+}
+
+async function resolveScopedAcademyId(req, ownerId, { createIfMissing = false } = {}) {
+  const provided = academyIdFromRequest(req);
+  if (provided) {
+    const valid = await Academy.findOne({ _id: provided, ownerId }).select('_id');
+    if (!valid) {
+      throw httpError(404, 'Academy not found');
+    }
+    return provided;
+  }
+  if (!createIfMissing) {
+    return null;
+  }
+  const academy = await ensureDefaultAcademy(ownerId);
+  return academy._id;
 }
 
 function sanitizeBatchPayload(body, { partial = false } = {}) {
@@ -153,9 +193,33 @@ function sanitizeAnnouncementPayload(body, { partial = false } = {}) {
   return payload;
 }
 
+exports.listAcademies = asyncHandler(async (req, res) => {
+  const ownerId = toObjectId(req.params.ownerId, 'ownerId');
+  const items = await Academy.find({ ownerId }).sort({ createdAt: 1 });
+  res.json(items);
+});
+
+exports.createAcademy = asyncHandler(async (req, res) => {
+  const ownerId = toObjectId(req.params.ownerId, 'ownerId');
+  const name = String(req.body?.name || '').trim();
+  if (!name) {
+    throw httpError(400, 'name is required');
+  }
+  const item = await Academy.create({
+    ownerId,
+    name,
+    city: String(req.body?.city || '').trim(),
+    status: String(req.body?.status || '').toLowerCase() === 'inactive' ? 'inactive' : 'active',
+  });
+  res.status(201).json(item);
+});
+
 exports.getDashboard = asyncHandler(async (req, res) => {
   const ownerId = toObjectId(req.params.ownerId, 'ownerId');
-  const monthKey = `${new Date().getFullYear()}-${String(new Date().getMonth() + 1).padStart(2, '0')}`;
+  const selectedAcademyId = await resolveScopedAcademyId(req, ownerId);
+  const fallbackMonthKey = `${new Date().getFullYear()}-${String(new Date().getMonth() + 1).padStart(2, '0')}`;
+  const requestedMonthKey = String(req.query.monthKey || '').trim();
+  const monthKey = /^\d{4}-\d{2}$/.test(requestedMonthKey) ? requestedMonthKey : fallbackMonthKey;
 
   let selectedBatchId;
   if (req.query.batchId) {
@@ -166,6 +230,9 @@ exports.getDashboard = asyncHandler(async (req, res) => {
   }
 
   const studentQuery = { ownerId };
+  if (selectedAcademyId) {
+    studentQuery.academyId = selectedAcademyId;
+  }
   if (selectedBatchId) {
     studentQuery.batchId = selectedBatchId;
   }
@@ -179,18 +246,24 @@ exports.getDashboard = asyncHandler(async (req, res) => {
   if (selectedBatchId) {
     const batchStudents = await AcademyStudent.find({
       ownerId,
+      ...(selectedAcademyId ? { academyId: selectedAcademyId } : {}),
       batchId: selectedBatchId,
     }).select('_id');
     const studentIds = batchStudents.map((student) => student._id);
     if (studentIds.length > 0) {
       monthFees = await AcademyFee.find({
         ownerId,
+        ...(selectedAcademyId ? { academyId: selectedAcademyId } : {}),
         monthKey,
         studentId: { $in: studentIds },
       });
     }
   } else {
-    monthFees = await AcademyFee.find({ ownerId, monthKey });
+    monthFees = await AcademyFee.find({
+      ownerId,
+      ...(selectedAcademyId ? { academyId: selectedAcademyId } : {}),
+      monthKey,
+    });
   }
 
   const today = normalizeDay();
@@ -200,13 +273,18 @@ exports.getDashboard = asyncHandler(async (req, res) => {
   if (selectedBatchId) {
     const todayAttendance = await AcademyAttendance.findOne({
       ownerId,
+      ...(selectedAcademyId ? { academyId: selectedAcademyId } : {}),
       batchId: selectedBatchId,
       date: today,
     });
     present = (todayAttendance?.entries || []).filter((entry) => entry.status === 'present').length;
     absent = (todayAttendance?.entries || []).filter((entry) => entry.status === 'absent').length;
   } else {
-    const attendanceItems = await AcademyAttendance.find({ ownerId, date: today });
+    const attendanceItems = await AcademyAttendance.find({
+      ownerId,
+      ...(selectedAcademyId ? { academyId: selectedAcademyId } : {}),
+      date: today,
+    });
     for (const item of attendanceItems) {
       present += (item.entries || []).filter((entry) => entry.status === 'present').length;
       absent += (item.entries || []).filter((entry) => entry.status === 'absent').length;
@@ -239,10 +317,14 @@ exports.getDashboard = asyncHandler(async (req, res) => {
 
 exports.listStudents = asyncHandler(async (req, res) => {
   const ownerId = toObjectId(req.params.ownerId, 'ownerId');
+  const selectedAcademyId = await resolveScopedAcademyId(req, ownerId);
   const page = Math.max(parseInt(req.query.page, 10) || 1, 1);
   const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 50, 1), 200);
 
   const query = { ownerId };
+  if (selectedAcademyId) {
+    query.academyId = selectedAcademyId;
+  }
 
   if (req.query.status) {
     query.status = req.query.status;
@@ -266,14 +348,15 @@ exports.listStudents = asyncHandler(async (req, res) => {
 
 exports.createStudent = asyncHandler(async (req, res) => {
   const ownerId = toObjectId(req.params.ownerId, 'ownerId');
-  const payload = { ...req.body, ownerId };
+  const academyId = await resolveScopedAcademyId(req, ownerId, { createIfMissing: true });
+  const payload = { ...req.body, ownerId, academyId };
 
   if (!payload.fullName || !String(payload.fullName).trim()) {
     throw httpError(400, 'fullName is required');
   }
 
   if (payload.batchId && mongoose.Types.ObjectId.isValid(payload.batchId)) {
-    const batch = await AcademyBatch.findOne({ _id: payload.batchId, ownerId });
+    const batch = await AcademyBatch.findOne({ _id: payload.batchId, ownerId, academyId });
     if (batch) {
       payload.batchId = batch._id;
       payload.batchName = batch.name;
@@ -290,7 +373,12 @@ exports.createStudent = asyncHandler(async (req, res) => {
 
 exports.getStudent = asyncHandler(async (req, res) => {
   const ownerId = toObjectId(req.params.ownerId, 'ownerId');
-  const student = await AcademyStudent.findOne({ _id: req.params.studentId, ownerId });
+  const selectedAcademyId = await resolveScopedAcademyId(req, ownerId);
+  const student = await AcademyStudent.findOne({
+    _id: req.params.studentId,
+    ownerId,
+    ...(selectedAcademyId ? { academyId: selectedAcademyId } : {}),
+  });
 
   if (!student) {
     throw httpError(404, 'Student not found');
@@ -301,10 +389,15 @@ exports.getStudent = asyncHandler(async (req, res) => {
 
 exports.updateStudent = asyncHandler(async (req, res) => {
   const ownerId = toObjectId(req.params.ownerId, 'ownerId');
+  const selectedAcademyId = await resolveScopedAcademyId(req, ownerId);
   const payload = { ...req.body };
 
   if (payload.batchId && mongoose.Types.ObjectId.isValid(payload.batchId)) {
-    const batch = await AcademyBatch.findOne({ _id: payload.batchId, ownerId });
+    const batch = await AcademyBatch.findOne({
+      _id: payload.batchId,
+      ownerId,
+      ...(selectedAcademyId ? { academyId: selectedAcademyId } : {}),
+    });
     if (batch) {
       payload.batchId = batch._id;
       payload.batchName = batch.name;
@@ -314,7 +407,11 @@ exports.updateStudent = asyncHandler(async (req, res) => {
   }
 
   const student = await AcademyStudent.findOneAndUpdate(
-    { _id: req.params.studentId, ownerId },
+    {
+      _id: req.params.studentId,
+      ownerId,
+      ...(selectedAcademyId ? { academyId: selectedAcademyId } : {}),
+    },
     payload,
     { new: true, runValidators: true },
   );
@@ -328,20 +425,33 @@ exports.updateStudent = asyncHandler(async (req, res) => {
 
 exports.deleteStudent = asyncHandler(async (req, res) => {
   const ownerId = toObjectId(req.params.ownerId, 'ownerId');
-  const student = await AcademyStudent.findOneAndDelete({ _id: req.params.studentId, ownerId });
+  const selectedAcademyId = await resolveScopedAcademyId(req, ownerId);
+  const student = await AcademyStudent.findOneAndDelete({
+    _id: req.params.studentId,
+    ownerId,
+    ...(selectedAcademyId ? { academyId: selectedAcademyId } : {}),
+  });
 
   if (!student) {
     throw httpError(404, 'Student not found');
   }
 
-  await AcademyFee.deleteMany({ ownerId, studentId: student._id });
+  await AcademyFee.deleteMany({
+    ownerId,
+    studentId: student._id,
+    ...(selectedAcademyId ? { academyId: selectedAcademyId } : {}),
+  });
 
   res.status(204).send();
 });
 
 exports.listBatches = asyncHandler(async (req, res) => {
   const ownerId = toObjectId(req.params.ownerId, 'ownerId');
+  const selectedAcademyId = await resolveScopedAcademyId(req, ownerId);
   const query = { ownerId };
+  if (selectedAcademyId) {
+    query.academyId = selectedAcademyId;
+  }
 
   if (req.query.status) {
     query.status = req.query.status;
@@ -357,14 +467,20 @@ exports.listBatches = asyncHandler(async (req, res) => {
 
 exports.createBatch = asyncHandler(async (req, res) => {
   const ownerId = toObjectId(req.params.ownerId, 'ownerId');
+  const academyId = await resolveScopedAcademyId(req, ownerId, { createIfMissing: true });
   const payload = sanitizeBatchPayload(req.body);
-  const batch = await AcademyBatch.create({ ...payload, ownerId });
+  const batch = await AcademyBatch.create({ ...payload, ownerId, academyId });
   res.status(201).json(batch);
 });
 
 exports.getBatch = asyncHandler(async (req, res) => {
   const ownerId = toObjectId(req.params.ownerId, 'ownerId');
-  const batch = await AcademyBatch.findOne({ _id: req.params.batchId, ownerId });
+  const selectedAcademyId = await resolveScopedAcademyId(req, ownerId);
+  const batch = await AcademyBatch.findOne({
+    _id: req.params.batchId,
+    ownerId,
+    ...(selectedAcademyId ? { academyId: selectedAcademyId } : {}),
+  });
 
   if (!batch) {
     throw httpError(404, 'Batch not found');
@@ -375,9 +491,14 @@ exports.getBatch = asyncHandler(async (req, res) => {
 
 exports.updateBatch = asyncHandler(async (req, res) => {
   const ownerId = toObjectId(req.params.ownerId, 'ownerId');
+  const selectedAcademyId = await resolveScopedAcademyId(req, ownerId);
   const payload = sanitizeBatchPayload(req.body, { partial: true });
   const batch = await AcademyBatch.findOneAndUpdate(
-    { _id: req.params.batchId, ownerId },
+    {
+      _id: req.params.batchId,
+      ownerId,
+      ...(selectedAcademyId ? { academyId: selectedAcademyId } : {}),
+    },
     payload,
     { new: true, runValidators: true },
   );
@@ -388,7 +509,11 @@ exports.updateBatch = asyncHandler(async (req, res) => {
 
   if (Object.prototype.hasOwnProperty.call(payload, 'name') && payload.name) {
     await AcademyStudent.updateMany(
-      { ownerId, batchId: batch._id },
+      {
+        ownerId,
+        batchId: batch._id,
+        ...(selectedAcademyId ? { academyId: selectedAcademyId } : {}),
+      },
       { $set: { batchName: payload.name } },
     );
   }
@@ -398,14 +523,23 @@ exports.updateBatch = asyncHandler(async (req, res) => {
 
 exports.deleteBatch = asyncHandler(async (req, res) => {
   const ownerId = toObjectId(req.params.ownerId, 'ownerId');
-  const batch = await AcademyBatch.findOneAndDelete({ _id: req.params.batchId, ownerId });
+  const selectedAcademyId = await resolveScopedAcademyId(req, ownerId);
+  const batch = await AcademyBatch.findOneAndDelete({
+    _id: req.params.batchId,
+    ownerId,
+    ...(selectedAcademyId ? { academyId: selectedAcademyId } : {}),
+  });
 
   if (!batch) {
     throw httpError(404, 'Batch not found');
   }
 
   await AcademyStudent.updateMany(
-    { ownerId, batchId: batch._id },
+    {
+      ownerId,
+      batchId: batch._id,
+      ...(selectedAcademyId ? { academyId: selectedAcademyId } : {}),
+    },
     { $set: { batchId: null, batchName: '' } },
   );
 
@@ -414,7 +548,11 @@ exports.deleteBatch = asyncHandler(async (req, res) => {
 
 exports.listAttendance = asyncHandler(async (req, res) => {
   const ownerId = toObjectId(req.params.ownerId, 'ownerId');
+  const selectedAcademyId = await resolveScopedAcademyId(req, ownerId);
   const query = { ownerId };
+  if (selectedAcademyId) {
+    query.academyId = selectedAcademyId;
+  }
 
   if (req.query.batchId && mongoose.Types.ObjectId.isValid(req.query.batchId)) {
     query.batchId = new mongoose.Types.ObjectId(req.query.batchId);
@@ -439,6 +577,7 @@ exports.listAttendance = asyncHandler(async (req, res) => {
 
 exports.markAttendance = asyncHandler(async (req, res) => {
   const ownerId = toObjectId(req.params.ownerId, 'ownerId');
+  const academyId = await resolveScopedAcademyId(req, ownerId, { createIfMissing: true });
 
   if (!req.body.batchId || !mongoose.Types.ObjectId.isValid(req.body.batchId)) {
     throw httpError(400, 'Valid batchId is required');
@@ -458,6 +597,7 @@ exports.markAttendance = asyncHandler(async (req, res) => {
   const attendance = await AcademyAttendance.findOneAndUpdate(
     {
       ownerId,
+      academyId,
       batchId: new mongoose.Types.ObjectId(req.body.batchId),
       date: normalizeDay(req.body.date),
     },
@@ -475,7 +615,11 @@ exports.markAttendance = asyncHandler(async (req, res) => {
 
 exports.listFees = asyncHandler(async (req, res) => {
   const ownerId = toObjectId(req.params.ownerId, 'ownerId');
+  const selectedAcademyId = await resolveScopedAcademyId(req, ownerId);
   const query = { ownerId };
+  if (selectedAcademyId) {
+    query.academyId = selectedAcademyId;
+  }
 
   if (req.query.studentId && mongoose.Types.ObjectId.isValid(req.query.studentId)) {
     query.studentId = new mongoose.Types.ObjectId(req.query.studentId);
@@ -498,6 +642,7 @@ exports.listFees = asyncHandler(async (req, res) => {
 
 exports.createFee = asyncHandler(async (req, res) => {
   const ownerId = toObjectId(req.params.ownerId, 'ownerId');
+  const academyId = await resolveScopedAcademyId(req, ownerId, { createIfMissing: true });
   if (!req.body.studentId || !mongoose.Types.ObjectId.isValid(req.body.studentId)) {
     throw httpError(400, 'Valid studentId is required');
   }
@@ -505,6 +650,7 @@ exports.createFee = asyncHandler(async (req, res) => {
   const fee = await AcademyFee.create({
     ...req.body,
     ownerId,
+    academyId,
     studentId: new mongoose.Types.ObjectId(req.body.studentId),
   });
 
@@ -513,8 +659,13 @@ exports.createFee = asyncHandler(async (req, res) => {
 
 exports.updateFee = asyncHandler(async (req, res) => {
   const ownerId = toObjectId(req.params.ownerId, 'ownerId');
+  const selectedAcademyId = await resolveScopedAcademyId(req, ownerId);
   const fee = await AcademyFee.findOneAndUpdate(
-    { _id: req.params.feeId, ownerId },
+    {
+      _id: req.params.feeId,
+      ownerId,
+      ...(selectedAcademyId ? { academyId: selectedAcademyId } : {}),
+    },
     req.body,
     { new: true, runValidators: true },
   );
@@ -528,8 +679,13 @@ exports.updateFee = asyncHandler(async (req, res) => {
 
 exports.sendFeeReminder = asyncHandler(async (req, res) => {
   const ownerId = toObjectId(req.params.ownerId, 'ownerId');
+  const selectedAcademyId = await resolveScopedAcademyId(req, ownerId);
   const fee = await AcademyFee.findOneAndUpdate(
-    { _id: req.params.feeId, ownerId },
+    {
+      _id: req.params.feeId,
+      ownerId,
+      ...(selectedAcademyId ? { academyId: selectedAcademyId } : {}),
+    },
     { $set: { reminderSentAt: new Date() } },
     { new: true },
   );
@@ -547,7 +703,11 @@ exports.sendFeeReminder = asyncHandler(async (req, res) => {
 
 exports.listAnnouncements = asyncHandler(async (req, res) => {
   const ownerId = toObjectId(req.params.ownerId, 'ownerId');
+  const selectedAcademyId = await resolveScopedAcademyId(req, ownerId);
   const query = { ownerId };
+  if (selectedAcademyId) {
+    query.academyId = selectedAcademyId;
+  }
 
   if (req.query.audience) {
     query.audience = req.query.audience;
@@ -567,10 +727,11 @@ exports.listAnnouncements = asyncHandler(async (req, res) => {
 
 exports.createAnnouncement = asyncHandler(async (req, res) => {
   const ownerId = toObjectId(req.params.ownerId, 'ownerId');
+  const academyId = await resolveScopedAcademyId(req, ownerId, { createIfMissing: true });
   const payload = sanitizeAnnouncementPayload(req.body);
 
   if (payload.batchId) {
-    const batch = await AcademyBatch.findOne({ _id: payload.batchId, ownerId }).select('_id');
+    const batch = await AcademyBatch.findOne({ _id: payload.batchId, ownerId, academyId }).select('_id');
     if (!batch) {
       throw httpError(404, 'Batch not found');
     }
@@ -584,15 +745,17 @@ exports.createAnnouncement = asyncHandler(async (req, res) => {
     payload.sentAt = new Date();
   }
 
-  const announcement = await AcademyAnnouncement.create({ ...payload, ownerId });
+  const announcement = await AcademyAnnouncement.create({ ...payload, ownerId, academyId });
   res.status(201).json(announcement);
 });
 
 exports.getAnnouncement = asyncHandler(async (req, res) => {
   const ownerId = toObjectId(req.params.ownerId, 'ownerId');
+  const selectedAcademyId = await resolveScopedAcademyId(req, ownerId);
   const announcement = await AcademyAnnouncement.findOne({
     _id: req.params.announcementId,
     ownerId,
+    ...(selectedAcademyId ? { academyId: selectedAcademyId } : {}),
   });
 
   if (!announcement) {
@@ -604,10 +767,15 @@ exports.getAnnouncement = asyncHandler(async (req, res) => {
 
 exports.updateAnnouncement = asyncHandler(async (req, res) => {
   const ownerId = toObjectId(req.params.ownerId, 'ownerId');
+  const selectedAcademyId = await resolveScopedAcademyId(req, ownerId);
   const payload = sanitizeAnnouncementPayload(req.body, { partial: true });
 
   if (payload.batchId) {
-    const batch = await AcademyBatch.findOne({ _id: payload.batchId, ownerId }).select('_id');
+    const batch = await AcademyBatch.findOne({
+      _id: payload.batchId,
+      ownerId,
+      ...(selectedAcademyId ? { academyId: selectedAcademyId } : {}),
+    }).select('_id');
     if (!batch) {
       throw httpError(404, 'Batch not found');
     }
@@ -618,7 +786,11 @@ exports.updateAnnouncement = asyncHandler(async (req, res) => {
   }
 
   const announcement = await AcademyAnnouncement.findOneAndUpdate(
-    { _id: req.params.announcementId, ownerId },
+    {
+      _id: req.params.announcementId,
+      ownerId,
+      ...(selectedAcademyId ? { academyId: selectedAcademyId } : {}),
+    },
     payload,
     { new: true, runValidators: true },
   );
@@ -632,9 +804,11 @@ exports.updateAnnouncement = asyncHandler(async (req, res) => {
 
 exports.deleteAnnouncement = asyncHandler(async (req, res) => {
   const ownerId = toObjectId(req.params.ownerId, 'ownerId');
+  const selectedAcademyId = await resolveScopedAcademyId(req, ownerId);
   const announcement = await AcademyAnnouncement.findOneAndDelete({
     _id: req.params.announcementId,
     ownerId,
+    ...(selectedAcademyId ? { academyId: selectedAcademyId } : {}),
   });
 
   if (!announcement) {

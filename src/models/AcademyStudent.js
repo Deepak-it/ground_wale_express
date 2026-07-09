@@ -3,6 +3,7 @@ const mongoose = require('mongoose');
 const academyStudentSchema = new mongoose.Schema(
   {
     ownerId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true, index: true },
+    academyId: { type: mongoose.Schema.Types.ObjectId, ref: 'Academy', index: true },
     fullName: { type: String, required: true, trim: true, index: true },
     phone: { type: String, trim: true },
     batchId: { type: mongoose.Schema.Types.ObjectId, ref: 'AcademyBatch', index: true },
@@ -15,5 +16,6 @@ const academyStudentSchema = new mongoose.Schema(
 );
 
 academyStudentSchema.index({ ownerId: 1, fullName: 1 });
+academyStudentSchema.index({ ownerId: 1, academyId: 1, fullName: 1 });
 
 module.exports = mongoose.model('AcademyStudent', academyStudentSchema);

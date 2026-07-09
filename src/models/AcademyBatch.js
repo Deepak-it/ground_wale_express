@@ -3,6 +3,7 @@ const mongoose = require('mongoose');
 const academyBatchSchema = new mongoose.Schema(
   {
     ownerId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true, index: true },
+    academyId: { type: mongoose.Schema.Types.ObjectId, ref: 'Academy', index: true },
     name: { type: String, required: true, trim: true },
     coachName: { type: String, trim: true },
     startTime: { type: String, trim: true, default: '06:00' },
@@ -16,5 +17,6 @@ const academyBatchSchema = new mongoose.Schema(
 );
 
 academyBatchSchema.index({ ownerId: 1, name: 1 });
+academyBatchSchema.index({ ownerId: 1, academyId: 1, name: 1 });
 
 module.exports = mongoose.model('AcademyBatch', academyBatchSchema);

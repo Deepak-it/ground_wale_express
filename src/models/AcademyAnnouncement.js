@@ -11,6 +11,7 @@ const studentDeliverySchema = new mongoose.Schema(
 const academyAnnouncementSchema = new mongoose.Schema(
   {
     ownerId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true, index: true },
+    academyId: { type: mongoose.Schema.Types.ObjectId, ref: 'Academy', index: true },
     title: { type: String, required: true, trim: true },
     message: { type: String, required: true, trim: true },
     kind: {
@@ -43,5 +44,6 @@ const academyAnnouncementSchema = new mongoose.Schema(
 );
 
 academyAnnouncementSchema.index({ ownerId: 1, createdAt: -1 });
+academyAnnouncementSchema.index({ ownerId: 1, academyId: 1, createdAt: -1 });
 
 module.exports = mongoose.model('AcademyAnnouncement', academyAnnouncementSchema);

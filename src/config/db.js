@@ -8,12 +8,12 @@ async function connectToDatabase() {
   if (mongoose.connection.readyState === 1) {
     return mongoose.connection;
   }
-
+mongodb://deepakit031:<db_password>@ac-cpp7uoq-shard-00-00.kyeygzd.mongodb.net:27017,ac-cpp7uoq-shard-00-01.kyeygzd.mongodb.net:27017,ac-cpp7uoq-shard-00-02.kyeygzd.mongodb.net:27017/?ssl=true&replicaSet=atlas-dzjg67-shard-0&authSource=admin&appName=Cluster0
   if (!connectionPromise) {
-    connectionPromise = mongoose.connect(env.mongoUri, {
-      dbName: env.dbName,
-      maxPoolSize: env.maxPoolSize,
-      minPoolSize: env.minPoolSize,
+    connectionPromise = mongoose.connect('mongodb://deepakit031:1234@ac-cpp7uoq-shard-00-00.kyeygzd.mongodb.net:27017,ac-cpp7uoq-shard-00-01.kyeygzd.mongodb.net:27017,ac-cpp7uoq-shard-00-02.kyeygzd.mongodb.net:27017/?ssl=true&replicaSet=atlas-dzjg67-shard-0&authSource=admin&appName=Cluster0', {
+      dbName: 'ground-booking',
+      maxPoolSize: 10,
+      minPoolSize: 2,
       serverSelectionTimeoutMS: 5000,
     });
 

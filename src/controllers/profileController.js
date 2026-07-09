@@ -11,43 +11,15 @@ function normalizeRole(value) {
     return undefined;
   }
 
-  if (
-    role === 'box_cricket_owner' ||
-    role === 'box' ||
-    role === 'box cricket' ||
-    role === 'box_cricket' ||
-    role === 'boxcricket' ||
-    role === 'box-cricket'
-  ) {
-    return 'box_cricket_owner';
+  if (role === 'owner') {
+    return 'owner';
   }
 
-  if (role === 'academy_owner' || role === 'academy' || role === 'coach') {
-    return 'academy_owner';
-  }
-
-  if (
-    role === 'ground_owner' ||
-    role === 'owner' ||
-    role === 'ground' ||
-    role === 'turf' ||
-    role === 'turf_owner'
-  ) {
-    return 'ground_owner';
-  }
-
-  if (
-    role === 'player' ||
-    role === 'captain' ||
-    role === 'sportsneo' ||
-    role === 'sports neo' ||
-    role === 'sports_neo' ||
-    role === 'sports-neo'
-  ) {
+  if (role === 'player') {
     return 'player';
   }
 
-  return role;
+  return null;
 }
 
 function normalizeSportsNeoRole(value) {
@@ -59,17 +31,17 @@ function normalizeSportsNeoRole(value) {
     return undefined;
   }
 
-  if (role === 'player' || role === 'captain') {
+  if (role === 'player' || role === 'owner') {
     return role;
   }
 
-  return role;
+  return null;
 }
 
 function resolveRoleForProfileUpdate({ role, sportsNeoRole }) {
   const normalizedSportsNeoRole = normalizeSportsNeoRole(sportsNeoRole);
-  if (normalizedSportsNeoRole === 'player' || normalizedSportsNeoRole === 'captain') {
-    return 'player';
+  if (normalizedSportsNeoRole === 'player' || normalizedSportsNeoRole === 'owner') {
+    return normalizedSportsNeoRole;
   }
 
   return normalizeRole(role);
@@ -120,15 +92,25 @@ exports.updateProfile = asyncHandler(async (req, res) => {
   const normalizedSportsNeoRole = hasField('sportsNeoRole')
     ? normalizeSportsNeoRole(req.body.sportsNeoRole)
     : undefined;
+  if (hasField('sportsNeoRole') && normalizedSportsNeoRole === null) {
+    throw httpError(400, 'sportsNeoRole must be either player or owner');
+  }
   if (normalizedSportsNeoRole !== undefined) {
     setPayload.sportsNeoRole = normalizedSportsNeoRole;
+  }
+
+  if (hasField('role')) {
+    const normalizedRole = normalizeRole(req.body.role);
+    if (normalizedRole === null) {
+      throw httpError(400, 'role must be either player or owner');
+    }
   }
 
   const resolvedRole = resolveRoleForProfileUpdate({
     role: hasField('role') ? req.body.role : undefined,
     sportsNeoRole: normalizedSportsNeoRole,
   });
-  if (resolvedRole !== undefined) {
+  if (resolvedRole !== undefined && resolvedRole !== null) {
     setPayload.role = resolvedRole;
   }
 

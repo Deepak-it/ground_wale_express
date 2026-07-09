@@ -21,46 +21,18 @@ function normalizeRole(value) {
     .toLowerCase();
 
   if (!role) {
-    return '';
+    return undefined;
   }
 
-  if (
-    role === 'box_cricket_owner' ||
-    role === 'box' ||
-    role === 'box cricket' ||
-    role === 'box_cricket' ||
-    role === 'boxcricket' ||
-    role === 'box-cricket'
-  ) {
-    return 'box_cricket_owner';
+  if (role === 'owner') {
+    return 'owner';
   }
 
-  if (role === 'academy_owner' || role === 'academy' || role === 'coach') {
-    return 'academy_owner';
-  }
-
-  if (
-    role === 'ground_owner' ||
-    role === 'owner' ||
-    role === 'ground' ||
-    role === 'turf' ||
-    role === 'turf_owner'
-  ) {
-    return 'ground_owner';
-  }
-
-  if (
-    role === 'player' ||
-    role === 'captain' ||
-    role === 'sportsneo' ||
-    role === 'sports neo' ||
-    role === 'sports_neo' ||
-    role === 'sports-neo'
-  ) {
+  if (role === 'player') {
     return 'player';
   }
 
-  return role;
+  return null;
 }
 
 exports.sendLoginOtp = asyncHandler(async (req, res) => {
@@ -106,7 +78,11 @@ exports.sendRegisterOtp = asyncHandler(async (req, res) => {
   };
 
   if (typeof role === 'string' && role.trim()) {
-    updatePayload.role = normalizeRole(role);
+    const normalizedRole = normalizeRole(role);
+    if (!normalizedRole) {
+      throw httpError(400, 'role must be either player or owner');
+    }
+    updatePayload.role = normalizedRole;
   }
 
   const user = await User.findOneAndUpdate(
@@ -319,6 +295,11 @@ exports.googleLogin = asyncHandler(async (req, res) => {
     throw httpError(400, 'email is required');
   }
 
+  const normalizedRole = normalizeRole(role);
+  if (!normalizedRole) {
+    throw httpError(400, 'role must be either player or owner');
+  }
+
   const normalizedEmail = String(email).trim().toLowerCase();
   let user = await User.findOne({ email: normalizedEmail });
 
@@ -329,7 +310,7 @@ exports.googleLogin = asyncHandler(async (req, res) => {
       email: normalizedEmail,
       contactNumber: generatedContact,
       otpVerified: true,
-      role: normalizeRole(role),
+      role: normalizedRole,
     });
   }
 

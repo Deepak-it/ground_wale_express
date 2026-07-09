@@ -4,6 +4,9 @@ const controller = require('../controllers/academyController');
 
 const router = express.Router();
 
+router.get('/:ownerId/academies', controller.listAcademies);
+router.post('/:ownerId/academies', controller.createAcademy);
+
 router.get('/:ownerId/dashboard', controller.getDashboard);
 
 router.get('/:ownerId/students', controller.listStudents);

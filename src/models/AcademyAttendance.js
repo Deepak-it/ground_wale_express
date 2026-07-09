@@ -11,6 +11,7 @@ const attendanceEntrySchema = new mongoose.Schema(
 const academyAttendanceSchema = new mongoose.Schema(
   {
     ownerId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true, index: true },
+    academyId: { type: mongoose.Schema.Types.ObjectId, ref: 'Academy', index: true },
     batchId: { type: mongoose.Schema.Types.ObjectId, ref: 'AcademyBatch', required: true, index: true },
     date: { type: Date, required: true, index: true },
     entries: { type: [attendanceEntrySchema], default: [] },
@@ -19,5 +20,6 @@ const academyAttendanceSchema = new mongoose.Schema(
 );
 
 academyAttendanceSchema.index({ ownerId: 1, batchId: 1, date: 1 }, { unique: true });
+academyAttendanceSchema.index({ ownerId: 1, academyId: 1, batchId: 1, date: 1 });
 
 module.exports = mongoose.model('AcademyAttendance', academyAttendanceSchema);
