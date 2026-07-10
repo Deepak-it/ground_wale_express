@@ -195,8 +195,48 @@ function sanitizeAnnouncementPayload(body, { partial = false } = {}) {
 
 exports.listAcademies = asyncHandler(async (req, res) => {
   const ownerId = toObjectId(req.params.ownerId, 'ownerId');
-  const items = await Academy.find({ ownerId }).sort({ createdAt: 1 });
-  res.json(items);
+
+  const selectFields = [
+    '_id',
+    'ownerId',
+    'name',
+    'groundName',
+    'location',
+    'address',
+    'state',
+    'city',
+    'entityType',
+    'pitchType',
+    'facilities',
+    'groundImages',
+    'status',
+    'createdAt',
+    'updatedAt',
+    'image',
+  ];
+
+  const items = await Academy.find({ ownerId })
+    .select(selectFields.join(' '))
+    .lean()
+    .sort({ createdAt: 1 });
+
+  const payload = items.map((item) => {
+    const firstGroundImage = Array.isArray(item.groundImages)
+      ? (item.groundImages[0] || '')
+      : '';
+    const legacyImage = typeof item.image === 'string' ? item.image : '';
+    const lightweightImage = firstGroundImage
+      || (legacyImage.startsWith('http://') || legacyImage.startsWith('https://')
+        ? legacyImage
+        : '');
+
+    return {
+      ...item,
+      image: legacyImage || firstGroundImage || lightweightImage,
+    };
+  });
+
+  res.json(payload);
 });
 
 exports.createAcademy = asyncHandler(async (req, res) => {

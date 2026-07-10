@@ -45,12 +45,32 @@ exports.getDashboard = asyncHandler(async (req, res) => {
 
 exports.getBoxCricketDashboard = asyncHandler(async (req, res) => {
   const ownerId = req.params.ownerId;
-  const grounds = await Ground.find({ ownerId }).select('_id');
+  const grounds = await Ground.find({ ownerId }).select(
+    '_id groundName location areaLocation facilities groundImages image',
+  );
   const groundIds = grounds.map((ground) => ground._id);
+
+  const groundsPayload = grounds.map((ground) => {
+    const primaryImage = Array.isArray(ground.groundImages)
+      ? (ground.groundImages[0] || '')
+      : '';
+    const legacyImage = typeof ground.image === 'string' ? ground.image : '';
+
+    return {
+      _id: ground._id,
+      name: ground.groundName || 'Ground',
+      location: ground.location || ground.areaLocation || 'Location not available',
+      facilities: Array.isArray(ground.facilities) ? ground.facilities : [],
+      image: legacyImage,
+      imageUrl: primaryImage,
+      rating: 4.6,
+    };
+  });
 
   if (groundIds.length === 0) {
     return res.json({
       todaysEarnings: 0,
+      grounds: [],
       upcomingBookings: [],
       slotStatus: { available: 0, booked: 0, blocked: 0 },
       teamActivity: {
@@ -135,6 +155,7 @@ exports.getBoxCricketDashboard = asyncHandler(async (req, res) => {
 
   return res.json({
     todaysEarnings,
+    grounds: groundsPayload,
     upcomingBookings: upcomingBookings.map((booking) => ({
       id: booking._id,
       timeRange: `${booking.startTime} - ${booking.endTime}`,

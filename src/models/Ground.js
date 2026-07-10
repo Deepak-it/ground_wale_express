@@ -67,6 +67,7 @@ const groundSchema = new mongoose.Schema(
     pitchType: { type: String, enum: ['cement', 'turf', 'matting', 'astroTurf'], default: 'cement' },
     facilities: { type: [String], default: ['Parking'] },
     groundImages: { type: [String], default: [] },
+    image: { type: String, trim: true },
     ownershipProof: { type: String, trim: true },
     openingTime: { type: String, default: '06:00 AM', trim: true },
     startDate: { type: Date },
