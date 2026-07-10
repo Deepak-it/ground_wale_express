@@ -12,6 +12,36 @@ function toDateOnly(input) {
   return new Date(parsed.getFullYear(), parsed.getMonth(), parsed.getDate());
 }
 
+function parseQueryDate(input, { endOfDay = false } = {}) {
+  if (!input) {
+    return null;
+  }
+
+  const value = String(input).trim();
+  const yyyyMmDdMatch = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
+
+  if (yyyyMmDdMatch) {
+    const year = Number(yyyyMmDdMatch[1]);
+    const month = Number(yyyyMmDdMatch[2]);
+    const day = Number(yyyyMmDdMatch[3]);
+    return endOfDay
+      ? new Date(year, month - 1, day, 23, 59, 59, 999)
+      : new Date(year, month - 1, day, 0, 0, 0, 0);
+  }
+
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) {
+    throw httpError(400, 'Invalid date value');
+  }
+
+  if (endOfDay) {
+    parsed.setHours(23, 59, 59, 999);
+  } else {
+    parsed.setHours(0, 0, 0, 0);
+  }
+  return parsed;
+}
+
 function toDateKey(date) {
   const month = String(date.getMonth() + 1).padStart(2, '0');
   const day = String(date.getDate()).padStart(2, '0');
@@ -28,15 +58,16 @@ exports.listSlots = asyncHandler(async (req, res) => {
   if (req.query.from || req.query.to) {
     query.date = {};
     if (req.query.from) {
-      query.date.$gte = new Date(req.query.from);
+      query.date.$gte = parseQueryDate(req.query.from);
     }
     if (req.query.to) {
-      const end = new Date(req.query.to);
-      end.setHours(23, 59, 59, 999);
-      query.date.$lte = end;
+      query.date.$lte = parseQueryDate(req.query.to, { endOfDay: true });
     }
   } else if (req.query.date) {
-    query.date = new Date(req.query.date);
+    query.date = {
+      $gte: parseQueryDate(req.query.date),
+      $lte: parseQueryDate(req.query.date, { endOfDay: true }),
+    };
   }
 
   const slots = await Slot.find(query).sort({ date: 1, startTime: 1 });
