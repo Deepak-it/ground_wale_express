@@ -209,6 +209,10 @@ exports.listAcademies = asyncHandler(async (req, res) => {
     'pitchType',
     'facilities',
     'groundImages',
+    'batch',
+    'sports',
+    'monthlyFee',
+    'reviewStatus',
     'status',
     'createdAt',
     'updatedAt',
@@ -245,13 +249,80 @@ exports.createAcademy = asyncHandler(async (req, res) => {
   if (!name) {
     throw httpError(400, 'name is required');
   }
-  const item = await Academy.create({
+
+  const payload = {
     ownerId,
     name,
     city: String(req.body?.city || '').trim(),
     status: String(req.body?.status || '').toLowerCase() === 'inactive' ? 'inactive' : 'active',
-  });
+  };
+
+  // Accept extended registration fields when provided
+  const extended = ['address', 'areaLocation', 'landmark', 'state', 'pinCode',
+    'ownershipProof', 'sports'];
+  for (const field of extended) {
+    if (req.body?.[field] !== undefined) payload[field] = req.body[field];
+  }
+  if (Array.isArray(req.body?.facilities)) payload.facilities = req.body.facilities;
+  if (Array.isArray(req.body?.groundImages)) payload.groundImages = req.body.groundImages;
+  if (req.body?.batch && typeof req.body.batch === 'object') payload.batch = req.body.batch;
+
+  const item = await Academy.create(payload);
   res.status(201).json(item);
+});
+
+exports.updateAcademy = asyncHandler(async (req, res) => {
+  const ownerId = toObjectId(req.params.ownerId, 'ownerId');
+  const { academyId } = req.params;
+  if (!academyId || !require('mongoose').Types.ObjectId.isValid(academyId)) {
+    throw httpError(400, 'Invalid academyId');
+  }
+  const allowed = ['name', 'city', 'state', 'address', 'areaLocation',
+    'landmark', 'pinCode', 'facilities', 'groundImages', 'sports', 'status'];
+  const update = {};
+  for (const key of allowed) {
+    if (Object.prototype.hasOwnProperty.call(req.body, key)) {
+      update[key] = req.body[key];
+    }
+  }
+  const academy = await Academy.findOneAndUpdate(
+    { _id: academyId, ownerId },
+    { $set: update },
+    { new: true, runValidators: true },
+  );
+  if (!academy) throw httpError(404, 'Academy not found');
+  res.json(academy);
+});
+
+exports.submitAcademyForReview = asyncHandler(async (req, res) => {
+  const ownerId = toObjectId(req.params.ownerId, 'ownerId');
+  const { academyId } = req.params;
+  if (!academyId || !require('mongoose').Types.ObjectId.isValid(academyId)) {
+    throw httpError(400, 'Invalid academyId');
+  }
+  const academy = await Academy.findOneAndUpdate(
+    { _id: academyId, ownerId },
+    { $set: { reviewStatus: 'under_review', submittedAt: new Date() } },
+    { new: true },
+  );
+  if (!academy) throw httpError(404, 'Academy not found');
+  res.json({ message: 'Academy submitted for review', academy });
+});
+
+exports.updateAcademyOwnershipProof = asyncHandler(async (req, res) => {
+  const ownerId = toObjectId(req.params.ownerId, 'ownerId');
+  const { academyId } = req.params;
+  if (!academyId || !require('mongoose').Types.ObjectId.isValid(academyId)) {
+    throw httpError(400, 'Invalid academyId');
+  }
+  const proof = String(req.body?.ownershipProof || '').trim();
+  const academy = await Academy.findOneAndUpdate(
+    { _id: academyId, ownerId },
+    { $set: { ownershipProof: proof } },
+    { new: true },
+  );
+  if (!academy) throw httpError(404, 'Academy not found');
+  res.json(academy);
 });
 
 exports.getDashboard = asyncHandler(async (req, res) => {

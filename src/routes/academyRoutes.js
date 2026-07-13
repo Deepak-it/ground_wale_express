@@ -6,6 +6,9 @@ const router = express.Router();
 
 router.get('/:ownerId/academies', controller.listAcademies);
 router.post('/:ownerId/academies', controller.createAcademy);
+router.post('/:ownerId/academies/:academyId/submit-review', controller.submitAcademyForReview);
+router.patch('/:ownerId/academies/:academyId/ownership-proof', controller.updateAcademyOwnershipProof);
+router.patch('/:ownerId/academies/:academyId', controller.updateAcademy);
 
 router.get('/:ownerId/dashboard', controller.getDashboard);
 

@@ -23,7 +23,7 @@ const pricingItemSchema = new mongoose.Schema(
 const groundSchema = new mongoose.Schema(
   {
     ownerId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true, index: true },
-    groundName: { type: String, required: true, trim: true },
+    groundName: { type: String, trim: true },
     location: { type: String, trim: true },
     address: { type: String, required: true, trim: true },
     areaLocation: { type: String, trim: true },
