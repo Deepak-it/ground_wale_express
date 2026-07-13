@@ -17,7 +17,21 @@ function toObjectId(value, fieldName) {
 }
 
 function normalizeDay(value) {
-  const date = value ? new Date(value) : new Date();
+  if (!value) {
+    const today = new Date();
+    return new Date(today.getFullYear(), today.getMonth(), today.getDate());
+  }
+
+  const text = String(value).trim();
+  const ymd = /^(\d{4})-(\d{2})-(\d{2})$/.exec(text);
+  if (ymd) {
+    return new Date(Number(ymd[1]), Number(ymd[2]) - 1, Number(ymd[3]));
+  }
+
+  const date = new Date(text);
+  if (Number.isNaN(date.getTime())) {
+    throw httpError(400, 'Invalid date value');
+  }
   return new Date(date.getFullYear(), date.getMonth(), date.getDate());
 }
 

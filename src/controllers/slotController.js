@@ -5,7 +5,13 @@ const httpError = require('../utils/httpError');
 const WEEKDAY_SHORT = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 
 function toDateOnly(input) {
-  const parsed = new Date(input);
+  const text = String(input || '').trim();
+  const ymd = /^(\d{4})-(\d{2})-(\d{2})$/.exec(text);
+  if (ymd) {
+    return new Date(Number(ymd[1]), Number(ymd[2]) - 1, Number(ymd[3]));
+  }
+
+  const parsed = new Date(text);
   if (Number.isNaN(parsed.getTime())) {
     throw httpError(400, 'Invalid date value');
   }
