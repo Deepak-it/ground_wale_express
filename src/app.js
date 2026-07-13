@@ -16,8 +16,8 @@ app.use(
   }),
 );
 app.use(compression());
-app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
+app.use(express.json({ limit: env.requestBodyLimit }));
+app.use(express.urlencoded({ extended: true, limit: env.requestBodyLimit }));
 app.use(morgan('dev'));
 
 app.get('/health', (_req, res) => {

@@ -1,6 +1,7 @@
 const User = require('../models/User');
 const asyncHandler = require('../utils/asyncHandler');
 const httpError = require('../utils/httpError');
+const { encryptImageString, decryptImageString } = require('../utils/imageCrypto');
 
 function normalizeRole(value) {
   const role = String(value || '')
@@ -48,13 +49,16 @@ function resolveRoleForProfileUpdate({ role, sportsNeoRole }) {
 }
 
 exports.getProfile = asyncHandler(async (req, res) => {
-  const user = await User.findById(req.params.ownerId);
+  const user = await User.findById(req.params.ownerId).lean();
 
   if (!user) {
     throw httpError(404, 'Owner not found');
   }
 
-  res.json(user);
+  res.json({
+    ...user,
+    profileImage: decryptImageString(user.profileImage),
+  });
 });
 
 exports.updateProfile = asyncHandler(async (req, res) => {
@@ -75,6 +79,9 @@ exports.updateProfile = asyncHandler(async (req, res) => {
   }
   if (hasField('contactNumber')) {
     setPayload.contactNumber = req.body.contactNumber;
+  }
+  if (hasField('profileImage')) {
+    setPayload.profileImage = encryptImageString(req.body.profileImage);
   }
   if (hasField('isCaptain')) {
     setPayload.isCaptain = req.body.isCaptain;
@@ -126,7 +133,11 @@ exports.updateProfile = asyncHandler(async (req, res) => {
     throw httpError(404, 'Owner not found');
   }
 
-  res.json(user);
+  const payload = user.toObject ? user.toObject() : user;
+  res.json({
+    ...payload,
+    profileImage: decryptImageString(payload.profileImage),
+  });
 });
 
 exports.getNotificationPreferences = asyncHandler(async (req, res) => {

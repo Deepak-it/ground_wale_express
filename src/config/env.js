@@ -10,4 +10,5 @@ module.exports = {
   maxPoolSize: Number(process.env.MAX_POOL_SIZE || 10),
   minPoolSize: Number(process.env.MIN_POOL_SIZE || 2),
   corsOrigin: process.env.CORS_ORIGIN || '*',
+  requestBodyLimit: process.env.REQUEST_BODY_LIMIT || '15mb',
 };

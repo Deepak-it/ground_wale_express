@@ -76,6 +76,7 @@ const userSchema = new mongoose.Schema(
     ownerName: { type: String, required: true, trim: true },
     contactNumber: { type: String, required: true, trim: true, index: true, unique: true },
     email: { type: String, trim: true, lowercase: true },
+    profileImage: { type: String, trim: true },
     address: { type: String, trim: true },
     mapLocation: { type: String, trim: true },
     role: {

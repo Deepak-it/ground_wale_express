@@ -88,9 +88,17 @@ exports.createSlot = asyncHandler(async (req, res) => {
   } = req.body;
 
   if (!dateFrom && !dateTo) {
+    if (!date) {
+      throw httpError(400, 'date is required');
+    }
+
+    const slotDate = toDateOnly(date);
+
     const slot = await Slot.create({
       ...req.body,
       groundId: req.params.groundId,
+      date: slotDate,
+      day: WEEKDAY_SHORT[slotDate.getDay()],
     });
 
     return res.status(201).json(slot);

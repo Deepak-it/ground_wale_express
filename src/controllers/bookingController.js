@@ -3,6 +3,14 @@ const Slot = require('../models/Slot');
 const asyncHandler = require('../utils/asyncHandler');
 const httpError = require('../utils/httpError');
 
+function toDateOnly(input) {
+  const parsed = new Date(input);
+  if (Number.isNaN(parsed.getTime())) {
+    throw httpError(400, 'Invalid date value');
+  }
+  return new Date(parsed.getFullYear(), parsed.getMonth(), parsed.getDate());
+}
+
 function resolveStatusFilter(status) {
   switch ((status || '').toLowerCase()) {
     case 'upcoming':
@@ -72,6 +80,8 @@ exports.createBooking = asyncHandler(async (req, res) => {
     throw httpError(400, 'slotId, teamName, date, startTime, endTime and amount are required');
   }
 
+  const bookingDate = toDateOnly(date);
+
   const slot = await Slot.findOne({ _id: slotId, groundId: req.params.groundId });
   if (!slot) {
     throw httpError(404, 'Slot not found for this ground');
@@ -88,7 +98,7 @@ exports.createBooking = asyncHandler(async (req, res) => {
     teamName,
     captainName: captainName || teamName,
     captainPhone: captainPhone || '',
-    date,
+    date: bookingDate,
     startTime,
     endTime,
     amount: Number(amount),

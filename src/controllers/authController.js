@@ -1,6 +1,7 @@
 const User = require('../models/User');
 const asyncHandler = require('../utils/asyncHandler');
 const httpError = require('../utils/httpError');
+const { decryptImageString } = require('../utils/imageCrypto');
 
 function generateOtp() {
   return String(Math.floor(1000 + Math.random() * 9000));
@@ -12,6 +13,18 @@ function otpResponse(user, otpCode, otpExpiresAt) {
     userId: user.id,
     otp: otpCode,
     expiresAt: otpExpiresAt,
+  };
+}
+
+function sanitizeUser(userDoc) {
+  const user = userDoc?.toObject ? userDoc.toObject() : userDoc;
+  if (!user) {
+    return user;
+  }
+
+  return {
+    ...user,
+    profileImage: decryptImageString(user.profileImage),
   };
 }
 
@@ -127,7 +140,7 @@ exports.verifyOtp = asyncHandler(async (req, res) => {
 
   res.json({
     message: 'OTP verified successfully',
-    user,
+    user: sanitizeUser(user),
   });
 });
 
@@ -183,7 +196,7 @@ exports.loginWithPassword = asyncHandler(async (req, res) => {
 
   res.json({
     message: 'Login successful',
-    user,
+    user: sanitizeUser(user),
   });
 });
 
@@ -316,6 +329,6 @@ exports.googleLogin = asyncHandler(async (req, res) => {
 
   res.json({
     message: 'Google login successful',
-    user,
+    user: sanitizeUser(user),
   });
 });
