@@ -49,109 +49,76 @@ function toDateKey(date) {
 }
 
 exports.listSlots = asyncHandler(async (req, res) => {
-  const query = { groundId: req.params.groundId };
+  const groundId = req.params.groundId;
 
-  if (req.query.status) {
-    query.status = req.query.status;
+  const fromDate = req.query.from ? parseQueryDate(req.query.from) : null;
+  const toDate   = req.query.to   ? parseQueryDate(req.query.to, { endOfDay: true })
+                 : req.query.date  ? parseQueryDate(req.query.date, { endOfDay: true })
+                 : null;
+  const singleDate = req.query.date ? parseQueryDate(req.query.date) : null;
+
+  // Build a query that matches BOTH range-based slots AND legacy single-date slots
+  const dateFilter = [];
+
+  if (fromDate || toDate) {
+    // Range slots that overlap the requested window
+    const rangeClause = { groundId, dateFrom: { $exists: true } };
+    if (fromDate) rangeClause.dateTo   = { $gte: fromDate };
+    if (toDate)   rangeClause.dateFrom = { ...rangeClause.dateFrom, $lte: toDate };
+    dateFilter.push(rangeClause);
+
+    // Legacy single-date slots inside the window
+    const legacyClause = { groundId, date: { $exists: true } };
+    if (fromDate) legacyClause.date.$gte = fromDate;
+    if (toDate)   legacyClause.date.$lte = toDate;
+    dateFilter.push(legacyClause);
+  } else if (singleDate) {
+    const endOfSingle = parseQueryDate(req.query.date, { endOfDay: true });
+    // Range slot covers this date
+    dateFilter.push({ groundId, dateFrom: { $lte: endOfSingle }, dateTo: { $gte: singleDate } });
+    // Legacy single-date slot
+    dateFilter.push({ groundId, date: { $gte: singleDate, $lte: endOfSingle } });
+  } else {
+    dateFilter.push({ groundId });
   }
 
-  if (req.query.from || req.query.to) {
-    query.date = {};
-    if (req.query.from) {
-      query.date.$gte = parseQueryDate(req.query.from);
-    }
-    if (req.query.to) {
-      query.date.$lte = parseQueryDate(req.query.to, { endOfDay: true });
-    }
-  } else if (req.query.date) {
-    query.date = {
-      $gte: parseQueryDate(req.query.date),
-      $lte: parseQueryDate(req.query.date, { endOfDay: true }),
-    };
-  }
+  const baseQuery = dateFilter.length > 1 ? { $or: dateFilter } : dateFilter[0];
+  if (req.query.status) baseQuery.status = req.query.status;
 
-  const slots = await Slot.find(query).sort({ date: 1, startTime: 1 });
+  const slots = await Slot.find(baseQuery).sort({ dateFrom: 1, date: 1, startTime: 1 });
   res.json(slots);
 });
 
 exports.createSlot = asyncHandler(async (req, res) => {
-  const {
-    dateFrom,
-    dateTo,
-    date,
-    startTime,
-    endTime,
-    price,
-    status,
-    blockedReason,
-    notes,
-  } = req.body;
+  const { dateFrom, dateTo, date, startTime, endTime, price, status, blockedReason, notes } = req.body;
 
-  if (!dateFrom && !dateTo) {
-    if (!date) {
-      throw httpError(400, 'date is required');
-    }
-
-    const slotDate = toDateOnly(date);
-
+  // ── Range-based slot: store ONE record (no per-day loop) ──────────────────
+  if (dateFrom && dateTo) {
     const slot = await Slot.create({
-      ...req.body,
       groundId: req.params.groundId,
-      date: slotDate,
-      day: WEEKDAY_SHORT[slotDate.getDay()],
-    });
-
-    return res.status(201).json(slot);
-  }
-
-  const startDate = toDateOnly(dateFrom || date);
-  const endDate = toDateOnly(dateTo || dateFrom || date);
-
-  if (endDate.getTime() < startDate.getTime()) {
-    throw httpError(400, 'dateTo must be greater than or equal to dateFrom');
-  }
-
-  const createdSlots = [];
-  const skippedDates = [];
-
-  for (
-    let cursor = new Date(startDate);
-    cursor.getTime() <= endDate.getTime();
-    cursor = new Date(cursor.getFullYear(), cursor.getMonth(), cursor.getDate() + 1)
-  ) {
-    const slotDate = new Date(cursor);
-    const existing = await Slot.findOne({
-      groundId: req.params.groundId,
-      date: slotDate,
+      dateFrom: toDateOnly(dateFrom),
+      dateTo:   toDateOnly(dateTo),
       startTime,
       endTime,
-    }).lean();
-
-    if (existing) {
-      skippedDates.push(toDateKey(slotDate));
-      continue;
-    }
-
-    const created = await Slot.create({
-      groundId: req.params.groundId,
-      date: slotDate,
-      day: WEEKDAY_SHORT[slotDate.getDay()],
-      startTime,
-      endTime,
-      price,
-      status,
+      price:  price  || 0,
+      status: status || 'available',
       blockedReason,
       notes,
     });
-    createdSlots.push(created);
+    return res.status(201).json(slot);
   }
 
-  return res.status(201).json({
-    createdCount: createdSlots.length,
-    skippedCount: skippedDates.length,
-    slots: createdSlots,
-    skippedDates,
+  // ── Single-date slot (legacy / specific booking) ───────────────────────
+  if (!date) throw httpError(400, 'date or dateFrom+dateTo is required');
+
+  const slotDate = toDateOnly(date);
+  const slot = await Slot.create({
+    ...req.body,
+    groundId: req.params.groundId,
+    date: slotDate,
+    day: WEEKDAY_SHORT[slotDate.getDay()],
   });
+  return res.status(201).json(slot);
 });
 
 exports.updateSlot = asyncHandler(async (req, res) => {

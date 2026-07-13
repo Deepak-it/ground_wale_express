@@ -3,7 +3,11 @@ const mongoose = require('mongoose');
 const slotSchema = new mongoose.Schema(
   {
     groundId: { type: mongoose.Schema.Types.ObjectId, ref: 'Ground', required: true, index: true },
-    date: { type: Date, required: true },
+    // Range-based slot (one record covers dateFrom → dateTo)
+    dateFrom: { type: Date, index: true },
+    dateTo:   { type: Date, index: true },
+    // Legacy single-date slot (kept for backward compat)
+    date: { type: Date, index: true },
     day: { type: String, trim: true },
     startTime: { type: String, required: true, trim: true },
     endTime: { type: String, required: true, trim: true },
