@@ -30,7 +30,7 @@ async function startServer() {
   await connectToDatabase();
 
   app.listen(env.port, () => {
-    console.log(`Ground Wale API listening on port ${env.port}`);
+    console.log(`Cric Info API listening on port ${env.port}`);
   });
 }
 
