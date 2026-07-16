@@ -11,6 +11,7 @@ const academyStudentSchema = new mongoose.Schema(
     joinDate: { type: Date, default: Date.now },
     monthlyFee: { type: Number, default: 0, min: 0 },
     status: { type: String, enum: ['active', 'inactive'], default: 'active', index: true },
+    photoBase64: { type: String, default: '' },
   },
   { timestamps: true },
 );

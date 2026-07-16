@@ -84,6 +84,8 @@ exports.getBoxCricketDashboard = asyncHandler(async (req, res) => {
   startOfDay.setHours(0, 0, 0, 0);
   const endOfDay = new Date(startOfDay);
   endOfDay.setDate(endOfDay.getDate() + 1);
+  const endOfDayInclusive = new Date(startOfDay);
+  endOfDayInclusive.setHours(23, 59, 59, 999);
 
   const [todayBookings, upcomingBookings, slotCounts, teamAgg] = await Promise.all([
     Booking.find({
@@ -104,6 +106,10 @@ exports.getBoxCricketDashboard = asyncHandler(async (req, res) => {
       {
         $match: {
           groundId: { $in: groundIds },
+          $or: [
+            { date: { $gte: startOfDay, $lte: endOfDayInclusive } },
+            { dateFrom: { $lte: endOfDayInclusive }, dateTo: { $gte: startOfDay } },
+          ],
         },
       },
       {

@@ -16,6 +16,21 @@ function toObjectId(value, fieldName) {
   return new mongoose.Types.ObjectId(value);
 }
 
+/**
+ * Convert a plan duration string to a number of days.
+ * Handles: 'Monthly' (30), 'Quarterly' (90), 'Yearly'/'Annual' (365),
+ * and custom strings like '75 Days', '60', '45 days'.
+ */
+function planDurationToDays(duration) {
+  const lower = String(duration || '').trim().toLowerCase();
+  if (lower === 'monthly') return 30;
+  if (lower === 'quarterly') return 90;
+  if (lower === 'yearly' || lower === 'annual') return 365;
+  const match = lower.match(/(\d+)/);
+  if (match) return parseInt(match[1], 10);
+  return 30;
+}
+
 function normalizeDay(value) {
   if (!value) {
     const today = new Date();
@@ -762,6 +777,30 @@ exports.listFees = asyncHandler(async (req, res) => {
     .sort({ monthKey: -1, createdAt: -1 })
     .populate('studentId', '_id fullName');
 
+  // Lazily expire paid fees whose subscription period has ended
+  const now = new Date();
+  const expiredIds = fees
+    .filter(
+      (f) =>
+        f.status === 'paid' &&
+        f.subscriptionEndDate instanceof Date &&
+        f.subscriptionEndDate < now,
+    )
+    .map((f) => f._id);
+
+  if (expiredIds.length > 0) {
+    await AcademyFee.updateMany(
+      { _id: { $in: expiredIds } },
+      { $set: { status: 'pending', paidAmount: 0 } },
+    );
+    fees.forEach((f) => {
+      if (expiredIds.some((id) => id.equals(f._id))) {
+        f.status = 'pending';
+        f.paidAmount = 0;
+      }
+    });
+  }
+
   res.json(fees);
 });
 
@@ -772,13 +811,26 @@ exports.createFee = asyncHandler(async (req, res) => {
     throw httpError(400, 'Valid studentId is required');
   }
 
-  const fee = await AcademyFee.create({
+  const feeData = {
     ...req.body,
     ownerId,
     academyId,
     studentId: new mongoose.Types.ObjectId(req.body.studentId),
-  });
+  };
 
+  // Auto-calculate subscriptionEndDate when a start date and plan are provided
+  if (feeData.subscriptionStartDate && feeData.planDuration) {
+    const startDate = new Date(feeData.subscriptionStartDate);
+    if (!Number.isNaN(startDate.getTime())) {
+      const days = planDurationToDays(feeData.planDuration);
+      const endDate = new Date(startDate);
+      endDate.setDate(endDate.getDate() + days);
+      feeData.subscriptionStartDate = startDate;
+      feeData.subscriptionEndDate = endDate;
+    }
+  }
+
+  const fee = await AcademyFee.create(feeData);
   res.status(201).json(fee);
 });
 
