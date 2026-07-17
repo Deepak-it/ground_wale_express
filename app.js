@@ -23,7 +23,12 @@ app.use(morgan('dev'));
 app.get('/health', (_req, res) => {
   res.json({ status: 'ok', service: 'ground-wale-express-api' });
 });
-
+app.use((req, res, next) => {
+  if (req.url.startsWith('/default/centific-cric')) {
+    req.url = req.url.replace('/default/centific-cric', '');
+  }
+  next();
+});
 app.use('/api/v1', routes);
 app.use(notFoundHandler);
 app.use(errorHandler);
