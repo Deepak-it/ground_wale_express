@@ -14,6 +14,8 @@ const slotSchema = new mongoose.Schema(
     price: { type: Number, required: true, min: 0 },
     status: { type: String, enum: ['available', 'booked', 'blocked'], default: 'available', index: true },
     bookedByTeam: { type: String, trim: true },
+    bookedDates: [{ type: Date }],
+    blockedDates: [{ type: String }],
     blockedReason: { type: String, trim: true },
     notes: { type: String, trim: true },
   },

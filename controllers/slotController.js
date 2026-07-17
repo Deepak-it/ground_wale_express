@@ -1,4 +1,5 @@
 const Slot = require('../models/Slot');
+const Booking = require('../models/Booking');
 const asyncHandler = require('../utils/asyncHandler');
 const httpError = require('../utils/httpError');
 
@@ -54,6 +55,32 @@ function toDateKey(date) {
   return `${date.getFullYear()}-${month}-${day}`;
 }
 
+function toStoredDayKey(value) {
+  if (!value) {
+    return null;
+  }
+
+  if (value instanceof Date && !Number.isNaN(value.getTime())) {
+    return toDateKey(value);
+  }
+
+  const text = String(value).trim();
+  if (!text) {
+    return null;
+  }
+
+  const ymd = /^(\d{4})-(\d{2})-(\d{2})$/.exec(text);
+  if (ymd) {
+    return `${ymd[1]}-${ymd[2]}-${ymd[3]}`;
+  }
+
+  const parsed = new Date(text);
+  if (Number.isNaN(parsed.getTime())) {
+    return null;
+  }
+  return toDateKey(parsed);
+}
+
 exports.listSlots = asyncHandler(async (req, res) => {
   const groundId = req.params.groundId;
 
@@ -92,7 +119,136 @@ exports.listSlots = asyncHandler(async (req, res) => {
   if (req.query.status) baseQuery.status = req.query.status;
 
   const slots = await Slot.find(baseQuery).sort({ dateFrom: 1, date: 1, startTime: 1 });
-  res.json(slots);
+  const rangeSlotIds = slots
+    .filter((slot) => slot.dateFrom && slot.dateTo && !slot.date)
+    .map((slot) => slot._id);
+
+  const bookedKeysBySlotId = new Map();
+  if (rangeSlotIds.length > 0 && (singleDate || fromDate || toDate)) {
+    const bookingQuery = {
+      groundId,
+      slotId: { $in: rangeSlotIds },
+      bookingStatus: { $ne: 'cancelled' },
+    };
+
+    if (singleDate) {
+      const dayKey = toDateKey(singleDate);
+      const endOfSingle = parseQueryDate(req.query.date, { endOfDay: true });
+      bookingQuery.$or = [
+        { date: dayKey },
+        { dateValue: { $gte: singleDate, $lte: endOfSingle } },
+      ];
+    } else {
+      const fromKey = fromDate ? toDateKey(fromDate) : null;
+      const toKey = toDate ? toDateKey(toDate) : null;
+      const dateStringRange = {};
+      if (fromKey) {
+        dateStringRange.$gte = fromKey;
+      }
+      if (toKey) {
+        dateStringRange.$lte = toKey;
+      }
+
+      const dateValueRange = {};
+      if (fromDate) {
+        dateValueRange.$gte = fromDate;
+      }
+      if (toDate) {
+        dateValueRange.$lte = toDate;
+      }
+
+      bookingQuery.$or = [
+        ...(Object.keys(dateStringRange).length > 0
+          ? [{ date: dateStringRange }]
+          : []),
+        ...(Object.keys(dateValueRange).length > 0
+          ? [{ dateValue: dateValueRange }]
+          : []),
+      ];
+    }
+
+    const bookings = await Booking.find(bookingQuery)
+      .select('slotId date dateValue')
+      .lean();
+
+    for (const booking of bookings) {
+      const dayKey = toStoredDayKey(booking.date) || toStoredDayKey(booking.dateValue);
+      if (!dayKey) {
+        continue;
+      }
+      const key = String(booking.slotId);
+      const bucket = bookedKeysBySlotId.get(key) || new Set();
+      bucket.add(dayKey);
+      bookedKeysBySlotId.set(key, bucket);
+    }
+  }
+
+  const normalizePayloadSlot = (slot) => {
+    const data = slot.toObject ? slot.toObject() : { ...slot };
+    const bookedDateKeys = Array.isArray(data.bookedDates)
+      ? data.bookedDates
+          .map((entry) => toStoredDayKey(entry))
+          .filter(Boolean)
+      : [];
+    const bookedFromBookings = bookedKeysBySlotId.get(String(data._id));
+    data.bookedDateKeys = Array.from(
+      new Set([
+        ...bookedDateKeys,
+        ...(bookedFromBookings ? Array.from(bookedFromBookings) : []),
+      ]),
+    );
+    data.blockedDateKeys = Array.isArray(data.blockedDates)
+      ? data.blockedDates
+          .map((entry) => toStoredDayKey(entry))
+          .filter(Boolean)
+      : [];
+    return data;
+  };
+
+  // For single-day availability, compute range-slot status against that exact date.
+  if (!singleDate) {
+    return res.json(slots.map(normalizePayloadSlot));
+  }
+
+  const rangeSlots = slots.filter((slot) => slot.dateFrom && slot.dateTo && !slot.date);
+  const singleDayKey = toDateKey(singleDate);
+
+  let bookedSlotIds = new Set();
+  bookedSlotIds = new Set(
+    Array.from(bookedKeysBySlotId.entries())
+      .filter(([, keys]) => keys.has(singleDayKey))
+      .map(([slotId]) => slotId),
+  );
+
+  const payload = slots.map((slot) => {
+    const data = normalizePayloadSlot(slot);
+    const isRangeSlot = Boolean(data.dateFrom && data.dateTo && !data.date);
+    if (!isRangeSlot) {
+      return data;
+    }
+
+    const fromBlockedDates = Array.isArray(data.blockedDateKeys)
+      ? data.blockedDateKeys.includes(singleDayKey)
+      : false;
+
+    if (data.status === 'blocked' || fromBlockedDates) {
+      data.status = 'blocked';
+      return data;
+    }
+
+    const fromBookedDates = Array.isArray(data.bookedDateKeys)
+      ? data.bookedDateKeys.includes(singleDayKey)
+      : false;
+    const isBookedForDate = bookedSlotIds.has(String(data._id)) || fromBookedDates;
+
+    data.status = isBookedForDate ? 'booked' : 'available';
+    if (!isBookedForDate) {
+      data.bookedByTeam = undefined;
+    }
+    return data;
+  });
+
+  return res.json(payload);
 });
 
 exports.createSlot = asyncHandler(async (req, res) => {
@@ -141,20 +297,41 @@ exports.updateSlot = asyncHandler(async (req, res) => {
 });
 
 exports.blockSlot = asyncHandler(async (req, res) => {
-  const slot = await Slot.findByIdAndUpdate(
-    req.params.slotId,
-    {
-      $set: {
-        status: 'blocked',
-        blockedReason: req.body.blockedReason || 'Blocked by owner',
-      },
-    },
-    { new: true },
-  );
+  const slot = await Slot.findById(req.params.slotId);
 
   if (!slot) {
     throw httpError(404, 'Slot not found');
   }
+
+  const blockedReason = req.body.blockedReason || 'Blocked by owner';
+  const blockDateInput = req.body.date;
+  const isRangeSlot = Boolean(slot.dateFrom && slot.dateTo && !slot.date);
+
+  if (isRangeSlot && blockDateInput) {
+    const blockDate = toDateOnly(blockDateInput);
+    if (blockDate < slot.dateFrom || blockDate > slot.dateTo) {
+      throw httpError(400, 'Date is outside slot range');
+    }
+
+    const dayKey = toDateKey(blockDate);
+    const existing = Array.isArray(slot.blockedDates)
+      ? slot.blockedDates.map((value) => String(value))
+      : [];
+    if (!existing.includes(dayKey)) {
+      existing.push(dayKey);
+    }
+    slot.blockedDates = existing;
+    if (slot.status === 'blocked') {
+      slot.status = 'available';
+    }
+    slot.blockedReason = blockedReason;
+    await slot.save();
+    return res.json(slot);
+  }
+
+  slot.status = 'blocked';
+  slot.blockedReason = blockedReason;
+  await slot.save();
 
   res.json(slot);
 });

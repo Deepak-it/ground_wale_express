@@ -90,16 +90,22 @@ exports.getBoxCricketDashboard = asyncHandler(async (req, res) => {
   const [todayBookings, upcomingBookings, slotCounts, teamAgg] = await Promise.all([
     Booking.find({
       groundId: { $in: groundIds },
-      date: { $gte: startOfDay, $lt: endOfDay },
+      $or: [
+        { dateValue: { $gte: startOfDay, $lt: endOfDay } },
+        { date: { $gte: startOfDay, $lt: endOfDay } },
+      ],
       bookingStatus: { $ne: 'cancelled' },
       paymentStatus: 'paid',
     }).lean(),
     Booking.find({
       groundId: { $in: groundIds },
-      date: { $gte: startOfDay },
+      $or: [
+        { dateValue: { $gte: startOfDay } },
+        { date: { $gte: startOfDay } },
+      ],
       bookingStatus: { $in: ['pending', 'confirmed'] },
     })
-      .sort({ date: 1, startTime: 1 })
+      .sort({ dateValue: 1, date: 1, startTime: 1 })
       .limit(6)
       .lean(),
     Slot.aggregate([

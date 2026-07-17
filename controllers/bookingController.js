@@ -17,6 +17,14 @@ function toDateOnly(input) {
   return new Date(parsed.getFullYear(), parsed.getMonth(), parsed.getDate());
 }
 
+function toDateKey(input) {
+  const localDate = toDateOnly(input);
+  const year = localDate.getFullYear();
+  const month = String(localDate.getMonth() + 1).padStart(2, '0');
+  const day = String(localDate.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
 function resolveStatusFilter(status) {
   switch ((status || '').toLowerCase()) {
     case 'upcoming':
@@ -86,15 +94,47 @@ exports.createBooking = asyncHandler(async (req, res) => {
     throw httpError(400, 'slotId, teamName, date, startTime, endTime and amount are required');
   }
 
-  const bookingDate = toDateOnly(date);
+  const bookingDateValue = toDateOnly(date);
+  const bookingDate = toDateKey(date);
 
   const slot = await Slot.findOne({ _id: slotId, groundId: req.params.groundId });
   if (!slot) {
     throw httpError(404, 'Slot not found for this ground');
   }
 
-  if (slot.status !== 'available') {
-    throw httpError(400, 'Selected slot is not available');
+  const isRangeSlot = Boolean(slot.dateFrom && slot.dateTo && !slot.date);
+  if (!isRangeSlot) {
+    if (slot.status !== 'available') {
+      throw httpError(400, 'Selected slot is not available');
+    }
+  } else {
+    if (slot.status === 'blocked') {
+      throw httpError(400, 'Selected slot is not available');
+    }
+
+    const slotStart = new Date(
+      slot.dateFrom.getFullYear(),
+      slot.dateFrom.getMonth(),
+      slot.dateFrom.getDate(),
+    );
+    const slotEnd = new Date(
+      slot.dateTo.getFullYear(),
+      slot.dateTo.getMonth(),
+      slot.dateTo.getDate(),
+    );
+    if (bookingDateValue < slotStart || bookingDateValue > slotEnd) {
+      throw httpError(400, 'Selected slot is not available for this date');
+    }
+
+    const existingBooking = await Booking.findOne({
+      groundId: req.params.groundId,
+      slotId,
+      date: bookingDate,
+      bookingStatus: { $ne: 'cancelled' },
+    }).lean();
+    if (existingBooking) {
+      throw httpError(400, 'Selected slot is already booked for this date');
+    }
   }
 
   const method = normalizePaymentMethod(paymentMethod);
@@ -105,6 +145,7 @@ exports.createBooking = asyncHandler(async (req, res) => {
     captainName: captainName || teamName,
     captainPhone: captainPhone || '',
     date: bookingDate,
+    dateValue: bookingDateValue,
     startTime,
     endTime,
     amount: Number(amount),
@@ -115,8 +156,23 @@ exports.createBooking = asyncHandler(async (req, res) => {
     playerCount: Number(playerCount || 0),
   });
 
-  slot.status = 'booked';
-  slot.bookedByTeam = teamName;
+  if (isRangeSlot) {
+    const existingDates = Array.isArray(slot.bookedDates)
+      ? slot.bookedDates.map((item) => String(item))
+      : [];
+    const sameDayExists = existingDates.some(
+      (item) => item === bookingDate,
+    );
+    if (!sameDayExists) {
+      existingDates.push(bookingDate);
+    }
+    slot.bookedDates = existingDates;
+    slot.status = 'available';
+    slot.bookedByTeam = '';
+  } else {
+    slot.status = 'booked';
+    slot.bookedByTeam = teamName;
+  }
   await slot.save();
 
   res.status(201).json(serializeBooking(booking));
@@ -127,7 +183,7 @@ exports.listBookings = asyncHandler(async (req, res) => {
     groundId: req.params.groundId,
     ...resolveStatusFilter(req.query.status),
   };
-  const bookings = await Booking.find(query).sort({ date: 1, startTime: 1 });
+  const bookings = await Booking.find(query).sort({ dateValue: 1, startTime: 1 });
   res.json(bookings.map(serializeBooking));
 });
 

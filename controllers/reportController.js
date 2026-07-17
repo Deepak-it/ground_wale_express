@@ -10,8 +10,11 @@ exports.getEarningsReport = asyncHandler(async (req, res) => {
   const [bookings, transactions] = await Promise.all([
     Booking.find({
       groundId,
-      date: { $gte: from, $lte: to },
-    }).sort({ date: -1 }),
+      $or: [
+        { dateValue: { $gte: from, $lte: to } },
+        { date: { $gte: from, $lte: to } },
+      ],
+    }).sort({ dateValue: -1, date: -1 }),
     WalletTransaction.find({
       groundId,
       occurredAt: { $gte: from, $lte: to },
