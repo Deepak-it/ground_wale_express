@@ -5,6 +5,7 @@ const slotController = require('../controllers/slotController');
 const bookingController = require('../controllers/bookingController');
 const walletController = require('../controllers/walletController');
 const reportController = require('../controllers/reportController');
+const sportsNeoLedgerController = require('../controllers/sportsNeoLedgerController');
 
 const router = express.Router();
 
@@ -28,6 +29,17 @@ router.get('/:groundId/bookings/summary', bookingController.getBookingSummary);
 router.get('/:groundId/wallet', walletController.getWallet);
 router.get('/:groundId/wallet/transactions', walletController.listTransactions);
 router.post('/:groundId/wallet/withdraw', walletController.withdraw);
+
+router.get('/:groundId/sports-neo/ledger', sportsNeoLedgerController.getLedgerHome);
+router.get('/:groundId/sports-neo/ledger/matches/:matchId', sportsNeoLedgerController.getMatchLedger);
+router.get('/:groundId/sports-neo/ledger/pending', sportsNeoLedgerController.getPendingLedger);
+router.get('/:groundId/sports-neo/ledger/advance', sportsNeoLedgerController.getAdvanceLedger);
+router.get('/:groundId/sports-neo/ledger/sarpanch', sportsNeoLedgerController.getSarpanchLedger);
+router.post('/:groundId/sports-neo/ledger/payments', sportsNeoLedgerController.addPayment);
+router.post('/:groundId/sports-neo/ledger/receipts', sportsNeoLedgerController.addReceipt);
+router.post('/:groundId/sports-neo/ledger/replacements', sportsNeoLedgerController.replacePlayer);
+router.post('/:groundId/sports-neo/ledger/pending/reminder', sportsNeoLedgerController.sendPendingReminder);
+router.post('/:groundId/sports-neo/ledger/advance/update', sportsNeoLedgerController.sendAdvanceUpdate);
 
 router.get('/:groundId/reports/earnings', reportController.getEarningsReport);
 
