@@ -1,7 +1,35 @@
 const Booking = require('../models/Booking');
 const Slot = require('../models/Slot');
+const Ground = require('../models/Ground');
+const WalletTransaction = require('../models/WalletTransaction');
 const asyncHandler = require('../utils/asyncHandler');
 const httpError = require('../utils/httpError');
+
+async function creditWalletForBooking(booking) {
+  if (!booking.amount || booking.amount <= 0) return;
+
+  const ground = await Ground.findById(booking.groundId).select('ownerId');
+  if (!ground || !ground.ownerId) return;
+
+  // Prevent duplicate credits for the same booking
+  const existing = await WalletTransaction.findOne({
+    groundId: booking.groundId,
+    type: 'credit',
+    subtitle: { $regex: booking._id.toString() },
+  });
+  if (existing) return;
+
+  await WalletTransaction.create({
+    ownerId: ground.ownerId,
+    groundId: booking.groundId,
+    type: 'credit',
+    amount: booking.amount,
+    title: `Booking - ${booking.teamName || 'Team'}`,
+    subtitle: `${booking.startTime} - ${booking.endTime} | ${booking._id}`,
+    status: 'success',
+    occurredAt: new Date(),
+  });
+}
 
 function toDateOnly(input) {
   const text = String(input || '').trim();
@@ -156,6 +184,10 @@ exports.createBooking = asyncHandler(async (req, res) => {
     playerCount: Number(playerCount || 0),
   });
 
+  if (booking.paymentStatus === 'paid') {
+    await creditWalletForBooking(booking);
+  }
+
   if (isRangeSlot) {
     const existingDates = Array.isArray(slot.bookedDates)
       ? slot.bookedDates.map((item) => String(item))
@@ -216,19 +248,21 @@ exports.getBooking = asyncHandler(async (req, res) => {
 });
 
 exports.updateBookingStatus = asyncHandler(async (req, res) => {
-  const booking = await Booking.findByIdAndUpdate(
-    req.params.bookingId,
-    {
-      $set: {
-        bookingStatus: req.body.bookingStatus,
-        paymentStatus: req.body.paymentStatus,
-      },
-    },
-    { new: true, runValidators: true },
-  );
+  const booking = await Booking.findById(req.params.bookingId);
 
   if (!booking) {
     throw httpError(404, 'Booking not found');
+  }
+
+  const wasNotPaid = booking.paymentStatus !== 'paid';
+  const willBePaid = req.body.paymentStatus === 'paid';
+
+  if (req.body.bookingStatus !== undefined) booking.bookingStatus = req.body.bookingStatus;
+  if (req.body.paymentStatus !== undefined) booking.paymentStatus = req.body.paymentStatus;
+  await booking.save();
+
+  if (wasNotPaid && willBePaid) {
+    await creditWalletForBooking(booking);
   }
 
   res.json(serializeBooking(booking));
@@ -283,9 +317,14 @@ exports.collectCodPayment = asyncHandler(async (req, res) => {
     throw httpError(400, 'Booking payment method is not COD');
   }
 
+  const wasNotPaid = booking.paymentStatus !== 'paid';
   booking.paymentStatus = 'paid';
   booking.bookingStatus = booking.bookingStatus === 'pending' ? 'confirmed' : booking.bookingStatus;
   await booking.save();
+
+  if (wasNotPaid) {
+    await creditWalletForBooking(booking);
+  }
 
   res.json(serializeBooking(booking));
 });

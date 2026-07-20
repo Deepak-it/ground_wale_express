@@ -4,20 +4,26 @@ const asyncHandler = require('../utils/asyncHandler');
 
 exports.getEarningsReport = asyncHandler(async (req, res) => {
   const { groundId } = req.params;
-  const from = req.query.from ? new Date(req.query.from) : new Date('1970-01-01');
-  const to = req.query.to ? new Date(req.query.to) : new Date();
+
+  const fromStr = req.query.from || '1970-01-01';
+  const toStr = req.query.to || new Date().toISOString().split('T')[0];
+
+  // Date objects for dateValue (Date type) comparison — to covers full day in UTC
+  const fromDate = new Date(fromStr);
+  const toDate = new Date(toStr);
+  toDate.setUTCHours(23, 59, 59, 999);
 
   const [bookings, transactions] = await Promise.all([
     Booking.find({
       groundId,
       $or: [
-        { dateValue: { $gte: from, $lte: to } },
-        { date: { $gte: from, $lte: to } },
+        { dateValue: { $gte: fromDate, $lte: toDate } },
+        { date: { $gte: fromStr, $lte: toStr } },   // string-to-string: safe lexicographic compare
       ],
     }).sort({ dateValue: -1, date: -1 }),
     WalletTransaction.find({
       groundId,
-      occurredAt: { $gte: from, $lte: to },
+      occurredAt: { $gte: fromDate, $lte: toDate },
     }).sort({ occurredAt: -1 }),
   ]);
 
@@ -30,8 +36,8 @@ exports.getEarningsReport = asyncHandler(async (req, res) => {
     .reduce((sum, transaction) => sum + Math.abs(transaction.amount), 0);
 
   res.json({
-    from,
-    to,
+    from: fromDate,
+    to: toDate,
     grossRevenue,
     settledCredits,
     withdrawals,
