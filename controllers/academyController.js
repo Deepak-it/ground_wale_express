@@ -775,7 +775,7 @@ exports.listFees = asyncHandler(async (req, res) => {
 
   const fees = await AcademyFee.find(query)
     .sort({ monthKey: -1, createdAt: -1 })
-    .populate('studentId', '_id fullName');
+    .populate('studentId', '_id fullName photoBase64');
 
   // Lazily expire paid fees whose subscription period has ended
   const now = new Date();
