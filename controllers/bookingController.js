@@ -166,6 +166,17 @@ exports.createBooking = asyncHandler(async (req, res) => {
   }
 
   const method = normalizePaymentMethod(paymentMethod);
+  const isOwnerBooking = String(req.body.source || '').toLowerCase() === 'owner';
+
+  // Owner-created bookings are always confirmed immediately.
+  // Sports-neo (player) bookings follow the payment-method logic.
+  const bookingStatus = isOwnerBooking
+    ? 'confirmed'
+    : method === 'cod' ? 'pending' : 'confirmed';
+  const paymentStatus = isOwnerBooking
+    ? (method === 'cod' ? 'pending' : 'paid')
+    : method === 'cod' ? 'pending' : 'paid';
+
   const booking = await Booking.create({
     groundId: req.params.groundId,
     slotId,
@@ -178,8 +189,8 @@ exports.createBooking = asyncHandler(async (req, res) => {
     endTime,
     amount: Number(amount),
     paymentMethod: method,
-    paymentStatus: method === 'cod' ? 'pending' : 'paid',
-    bookingStatus: method === 'cod' ? 'pending' : 'confirmed',
+    paymentStatus,
+    bookingStatus,
     notes: notes || '',
     playerCount: Number(playerCount || 0),
   });
@@ -211,18 +222,30 @@ exports.createBooking = asyncHandler(async (req, res) => {
 });
 
 exports.listBookings = asyncHandler(async (req, res) => {
+  const statusFilter = resolveStatusFilter(req.query.status);
+  if ((req.query.status || '').toLowerCase() === 'upcoming') {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    statusFilter.dateValue = { $gte: today };
+  }
   const query = {
     groundId: req.params.groundId,
-    ...resolveStatusFilter(req.query.status),
+    ...statusFilter,
   };
   const bookings = await Booking.find(query).sort({ dateValue: 1, startTime: 1 });
   res.json(bookings.map(serializeBooking));
 });
 
 exports.getBookingSummary = asyncHandler(async (req, res) => {
+  const statusFilter = resolveStatusFilter(req.query.status);
+  if ((req.query.status || '').toLowerCase() === 'upcoming') {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    statusFilter.dateValue = { $gte: today };
+  }
   const query = {
     groundId: req.params.groundId,
-    ...resolveStatusFilter(req.query.status),
+    ...statusFilter,
   };
 
   const bookings = await Booking.find(query).lean();

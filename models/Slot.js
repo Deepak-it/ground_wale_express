@@ -17,6 +17,8 @@ const slotSchema = new mongoose.Schema(
     bookedDates: [{ type: Date }],
     blockedDates: [{ type: String }],
     blockedReason: { type: String, trim: true },
+    deletedDates: [{ type: String }],
+    priceOverrides: { type: Map, of: Number, default: {} },
     notes: { type: String, trim: true },
   },
   {

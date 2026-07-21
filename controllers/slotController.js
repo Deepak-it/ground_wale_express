@@ -185,6 +185,11 @@ exports.listSlots = asyncHandler(async (req, res) => {
 
   const normalizePayloadSlot = (slot) => {
     const data = slot.toObject ? slot.toObject() : { ...slot };
+    // Mongoose Map fields may remain as Map instances after toObject().
+    // Explicitly convert to plain objects so JSON.stringify serializes them.
+    if (data.priceOverrides instanceof Map) {
+      data.priceOverrides = Object.fromEntries(data.priceOverrides);
+    }
     const bookedDateKeys = Array.isArray(data.bookedDates)
       ? data.bookedDates
           .map((entry) => toStoredDayKey(entry))
@@ -227,6 +232,14 @@ exports.listSlots = asyncHandler(async (req, res) => {
       return data;
     }
 
+    // Exclude slots where this specific day has been soft-deleted.
+    const deletedKeys = Array.isArray(data.deletedDates)
+      ? data.deletedDates.map((d) => String(d))
+      : [];
+    if (deletedKeys.includes(singleDayKey)) {
+      return null;
+    }
+
     const fromBlockedDates = Array.isArray(data.blockedDateKeys)
       ? data.blockedDateKeys.includes(singleDayKey)
       : false;
@@ -245,10 +258,17 @@ exports.listSlots = asyncHandler(async (req, res) => {
     if (!isBookedForDate) {
       data.bookedByTeam = undefined;
     }
+
+    // Apply per-day price override for this specific date if one exists.
+    const priceOverrides = data.priceOverrides || {};
+    if (priceOverrides[singleDayKey] !== undefined) {
+      data.price = priceOverrides[singleDayKey];
+    }
+
     return data;
   });
 
-  return res.json(payload);
+  return res.json(payload.filter(Boolean));
 });
 
 exports.createSlot = asyncHandler(async (req, res) => {
@@ -284,16 +304,45 @@ exports.createSlot = asyncHandler(async (req, res) => {
 });
 
 exports.updateSlot = asyncHandler(async (req, res) => {
-  const slot = await Slot.findByIdAndUpdate(req.params.slotId, req.body, {
-    new: true,
-    runValidators: true,
-  });
+  const slot = await Slot.findById(req.params.slotId);
 
   if (!slot) {
     throw httpError(404, 'Slot not found');
   }
 
-  res.json(slot);
+  const { date: dateInput, price, ...rest } = req.body;
+  const isRangeSlot = Boolean(slot.dateFrom && slot.dateTo && !slot.date);
+
+  if (isRangeSlot && dateInput !== undefined && price !== undefined) {
+    // For range slots: store a per-day price override instead of mutating the
+    // base price (which would affect every day in the range).
+    const dayKey = toStoredDayKey(dateInput);
+    if (!dayKey) {
+      throw httpError(400, 'Invalid date value');
+    }
+    // Use Mongoose Map's .set() so the field is correctly marked as modified.
+    if (!slot.priceOverrides) {
+      slot.priceOverrides = new Map();
+    }
+    slot.priceOverrides.set(dayKey, Number(price));
+    slot.markModified('priceOverrides');
+
+    // Apply any other non-price fields (e.g. startTime / endTime / status)
+    // to the base document as usual.
+    for (const [key, value] of Object.entries(rest)) {
+      slot[key] = value;
+    }
+
+    await slot.save();
+    return res.json(slot);
+  }
+
+  // Non-range slot or no date supplied: update the whole document normally.
+  const updated = await Slot.findByIdAndUpdate(req.params.slotId, req.body, {
+    new: true,
+    runValidators: true,
+  });
+  res.json(updated);
 });
 
 exports.blockSlot = asyncHandler(async (req, res) => {
@@ -337,11 +386,34 @@ exports.blockSlot = asyncHandler(async (req, res) => {
 });
 
 exports.deleteSlot = asyncHandler(async (req, res) => {
-  const slot = await Slot.findByIdAndDelete(req.params.slotId);
+  const slot = await Slot.findById(req.params.slotId);
 
   if (!slot) {
     throw httpError(404, 'Slot not found');
   }
 
+  const deleteDateInput = req.query.date;
+  const isRangeSlot = Boolean(slot.dateFrom && slot.dateTo && !slot.date);
+
+  if (isRangeSlot && deleteDateInput) {
+    // For range slots: soft-delete a single day by recording it in deletedDates.
+    // This mirrors the blockedDates pattern used in blockSlot.
+    const dayKey = toStoredDayKey(deleteDateInput);
+    if (!dayKey) {
+      throw httpError(400, 'Invalid date value');
+    }
+    const existing = Array.isArray(slot.deletedDates)
+      ? slot.deletedDates.map((v) => String(v))
+      : [];
+    if (!existing.includes(dayKey)) {
+      existing.push(dayKey);
+    }
+    slot.deletedDates = existing;
+    await slot.save();
+    return res.status(204).send();
+  }
+
+  // No date supplied (or not a range slot): hard-delete the entire document.
+  await Slot.findByIdAndDelete(req.params.slotId);
   res.status(204).send();
 });
