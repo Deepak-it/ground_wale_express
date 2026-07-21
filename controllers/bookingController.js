@@ -35,21 +35,21 @@ function toDateOnly(input) {
   const text = String(input || '').trim();
   const ymd = /^(\d{4})-(\d{2})-(\d{2})$/.exec(text);
   if (ymd) {
-    return new Date(Number(ymd[1]), Number(ymd[2]) - 1, Number(ymd[3]));
+    return new Date(Date.UTC(Number(ymd[1]), Number(ymd[2]) - 1, Number(ymd[3])));
   }
 
   const parsed = new Date(text);
   if (Number.isNaN(parsed.getTime())) {
     throw httpError(400, 'Invalid date value');
   }
-  return new Date(parsed.getFullYear(), parsed.getMonth(), parsed.getDate());
+  return new Date(Date.UTC(parsed.getUTCFullYear(), parsed.getUTCMonth(), parsed.getUTCDate()));
 }
 
 function toDateKey(input) {
   const localDate = toDateOnly(input);
-  const year = localDate.getFullYear();
-  const month = String(localDate.getMonth() + 1).padStart(2, '0');
-  const day = String(localDate.getDate()).padStart(2, '0');
+  const year = localDate.getUTCFullYear();
+  const month = String(localDate.getUTCMonth() + 1).padStart(2, '0');
+  const day = String(localDate.getUTCDate()).padStart(2, '0');
   return `${year}-${month}-${day}`;
 }
 

@@ -9,14 +9,14 @@ function toDateOnly(input) {
   const text = String(input || '').trim();
   const ymd = /^(\d{4})-(\d{2})-(\d{2})$/.exec(text);
   if (ymd) {
-    return new Date(Number(ymd[1]), Number(ymd[2]) - 1, Number(ymd[3]));
+    return new Date(Date.UTC(Number(ymd[1]), Number(ymd[2]) - 1, Number(ymd[3])));
   }
 
   const parsed = new Date(text);
   if (Number.isNaN(parsed.getTime())) {
     throw httpError(400, 'Invalid date value');
   }
-  return new Date(parsed.getFullYear(), parsed.getMonth(), parsed.getDate());
+  return new Date(Date.UTC(parsed.getUTCFullYear(), parsed.getUTCMonth(), parsed.getUTCDate()));
 }
 
 function parseQueryDate(input, { endOfDay = false } = {}) {
@@ -32,8 +32,8 @@ function parseQueryDate(input, { endOfDay = false } = {}) {
     const month = Number(yyyyMmDdMatch[2]);
     const day = Number(yyyyMmDdMatch[3]);
     return endOfDay
-      ? new Date(year, month - 1, day, 23, 59, 59, 999)
-      : new Date(year, month - 1, day, 0, 0, 0, 0);
+      ? new Date(Date.UTC(year, month - 1, day, 23, 59, 59, 999))
+      : new Date(Date.UTC(year, month - 1, day));
   }
 
   const parsed = new Date(value);
@@ -42,17 +42,15 @@ function parseQueryDate(input, { endOfDay = false } = {}) {
   }
 
   if (endOfDay) {
-    parsed.setHours(23, 59, 59, 999);
-  } else {
-    parsed.setHours(0, 0, 0, 0);
+    return new Date(Date.UTC(parsed.getUTCFullYear(), parsed.getUTCMonth(), parsed.getUTCDate(), 23, 59, 59, 999));
   }
-  return parsed;
+  return new Date(Date.UTC(parsed.getUTCFullYear(), parsed.getUTCMonth(), parsed.getUTCDate()));
 }
 
 function toDateKey(date) {
-  const month = String(date.getMonth() + 1).padStart(2, '0');
-  const day = String(date.getDate()).padStart(2, '0');
-  return `${date.getFullYear()}-${month}-${day}`;
+  const month = String(date.getUTCMonth() + 1).padStart(2, '0');
+  const day = String(date.getUTCDate()).padStart(2, '0');
+  return `${date.getUTCFullYear()}-${month}-${day}`;
 }
 
 function toStoredDayKey(value) {
