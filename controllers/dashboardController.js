@@ -55,6 +55,9 @@ exports.getBoxCricketDashboard = asyncHandler(async (req, res) => {
       ? (ground.groundImages[0] || '')
       : '';
     const legacyImage = typeof ground.image === 'string' ? ground.image : '';
+    const imageUrls = Array.isArray(ground.groundImages)
+      ? ground.groundImages.filter((item) => typeof item === 'string' && item.trim() !== '')
+      : [];
 
     return {
       _id: ground._id,
@@ -63,6 +66,7 @@ exports.getBoxCricketDashboard = asyncHandler(async (req, res) => {
       facilities: Array.isArray(ground.facilities) ? ground.facilities : [],
       image: legacyImage,
       imageUrl: primaryImage,
+      imageUrls,
       rating: 4.6,
     };
   });
