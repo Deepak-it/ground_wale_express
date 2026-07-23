@@ -30,8 +30,8 @@ const groundSchema = new mongoose.Schema(
     pinCode: { type: String, trim: true },
     landmark: { type: String, trim: true },
     description: { type: String, trim: true },
-    state: { type: String, default: 'Punjab', trim: true },
-    city: { type: String, default: 'Mohali', trim: true },
+    state: { type: String, default: '', trim: true },
+    city: { type: String, default: '', trim: true },
     sports: { type: [String], default: [] },
     offerType: {
       type: String,

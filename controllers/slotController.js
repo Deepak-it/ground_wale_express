@@ -79,6 +79,56 @@ function toStoredDayKey(value) {
   return toDateKey(parsed);
 }
 
+function timeToMinutes(value) {
+  const text = String(value || '').trim();
+  if (!text) {
+    throw httpError(400, 'startTime and endTime are required');
+  }
+
+  const twelveHour = /^(\d{1,2}):(\d{2})\s*([AaPp][Mm])$/.exec(text);
+  if (twelveHour) {
+    let hour = Number(twelveHour[1]);
+    const minute = Number(twelveHour[2]);
+    const period = twelveHour[3].toUpperCase();
+    if (hour === 12) {
+      hour = 0;
+    }
+    if (period === 'PM') {
+      hour += 12;
+    }
+    return hour * 60 + minute;
+  }
+
+  const twentyFourHour = /^(\d{1,2}):(\d{2})$/.exec(text);
+  if (twentyFourHour) {
+    const hour = Number(twentyFourHour[1]);
+    const minute = Number(twentyFourHour[2]);
+    return hour * 60 + minute;
+  }
+
+  throw httpError(400, 'Invalid time format. Use HH:MM or HH:MM AM/PM');
+}
+
+function timeRangesOverlap(startA, endA, startB, endB) {
+  let aStart = timeToMinutes(startA);
+  let aEnd = timeToMinutes(endA);
+  if (aEnd <= aStart) {
+    aEnd += 24 * 60;
+  }
+
+  let bStart = timeToMinutes(startB);
+  let bEnd = timeToMinutes(endB);
+  if (bEnd <= bStart) {
+    bEnd += 24 * 60;
+  }
+
+  return aStart < bEnd && bStart < aEnd;
+}
+
+function dateRangesOverlap(fromA, toA, fromB, toB) {
+  return fromA <= toB && fromB <= toA;
+}
+
 exports.listSlots = asyncHandler(async (req, res) => {
   const groundId = req.params.groundId;
 
@@ -270,17 +320,74 @@ exports.listSlots = asyncHandler(async (req, res) => {
 });
 
 exports.createSlot = asyncHandler(async (req, res) => {
-  const { dateFrom, dateTo, date, startTime, endTime, price, status, blockedReason, notes } = req.body;
+  const { dateFrom, dateTo, date, startTime, endTime, price, dayPrices, status, blockedReason, notes } = req.body;
 
   // ── Range-based slot: store ONE record (no per-day loop) ──────────────────
   if (dateFrom && dateTo) {
+    const newFrom = toDateOnly(dateFrom);
+    const newTo = toDateOnly(dateTo);
+    if (newTo < newFrom) {
+      throw httpError(400, 'dateTo cannot be before dateFrom');
+    }
+
+    const overlaps = await Slot.find({
+      groundId: req.params.groundId,
+      dateFrom: { $exists: true, $lte: newTo },
+      dateTo: { $exists: true, $gte: newFrom },
+    })
+      .select('dateFrom dateTo startTime endTime')
+      .lean();
+
+    for (const existing of overlaps) {
+      const existingFrom = existing.dateFrom ? new Date(existing.dateFrom) : null;
+      const existingTo = existing.dateTo ? new Date(existing.dateTo) : null;
+      if (!existingFrom || !existingTo) {
+        continue;
+      }
+      if (!dateRangesOverlap(newFrom, newTo, existingFrom, existingTo)) {
+        continue;
+      }
+      if (!timeRangesOverlap(startTime, endTime, existing.startTime, existing.endTime)) {
+        continue;
+      }
+
+      const sameDates =
+        newFrom.getTime() === existingFrom.getTime() &&
+        newTo.getTime() === existingTo.getTime();
+      if (sameDates) {
+        throw httpError(
+          409,
+          'This duration has same dates and overlapping slot timing. Please choose different timing.',
+        );
+      }
+      throw httpError(
+        409,
+        'Duration dates overlap and slot timing also overlaps with an existing duration. Please adjust date range or time.',
+      );
+    }
+    const priceOverrides = {};
+
+    if (dayPrices) {
+      for (
+        let d = new Date(newFrom);
+        d <= newTo;
+        d = new Date(d.getTime() + 86400000)
+      ) {
+        const weekday = WEEKDAY_SHORT[d.getUTCDay()];
+
+        if (dayPrices[weekday] != null) {
+          priceOverrides[toDateKey(d)] = Number(dayPrices[weekday]);
+        }
+      }
+    }
     const slot = await Slot.create({
       groundId: req.params.groundId,
-      dateFrom: toDateOnly(dateFrom),
-      dateTo:   toDateOnly(dateTo),
+      dateFrom: newFrom,
+      dateTo:   newTo,
       startTime,
       endTime,
       price:  price  || 0,
+      priceOverrides,
       status: status || 'available',
       blockedReason,
       notes,
