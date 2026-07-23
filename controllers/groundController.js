@@ -19,7 +19,41 @@ exports.listGrounds = asyncHandler(async (req, res) => {
   }
 
   const grounds = await Ground.find(query).sort({ updatedAt: -1 });
-  res.json(grounds);
+
+  const payload = grounds.map((ground) => {
+    const item = ground.toObject ? ground.toObject() : { ...ground };
+
+    const addIfValid = (bucket, value) => {
+      const text = typeof value === 'string' ? value.trim() : '';
+      if (text && !bucket.includes(text)) {
+        bucket.push(text);
+      }
+    };
+
+    const allImages = [];
+    if (Array.isArray(item.groundImages)) {
+      for (const value of item.groundImages) {
+        addIfValid(allImages, value);
+      }
+    }
+    if (Array.isArray(item.imageUrls)) {
+      for (const value of item.imageUrls) {
+        addIfValid(allImages, value);
+      }
+    }
+    addIfValid(allImages, item.image);
+
+    return {
+      ...item,
+      groundImages: allImages,
+      imageUrls: allImages,
+      image: typeof item.image === 'string' && item.image.trim().length > 0
+        ? item.image
+        : (allImages[0] || ''),
+    };
+  });
+
+  res.json(payload);
 });
 
 exports.getGround = asyncHandler(async (req, res) => {

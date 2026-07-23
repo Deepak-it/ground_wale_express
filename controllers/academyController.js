@@ -254,9 +254,31 @@ exports.listAcademies = asyncHandler(async (req, res) => {
     .sort({ createdAt: 1 });
 
   const payload = items.map((item) => {
-    const firstGroundImage = Array.isArray(item.groundImages)
-      ? (item.groundImages[0] || '')
-      : '';
+    const addIfValid = (bucket, value) => {
+      const text = typeof value === 'string' ? value.trim() : '';
+      if (text && !bucket.includes(text)) {
+        bucket.push(text);
+      }
+    };
+
+    const allImages = [];
+    if (Array.isArray(item.groundImages)) {
+      for (const value of item.groundImages) {
+        addIfValid(allImages, value);
+      }
+    }
+    if (Array.isArray(item.imageUrls)) {
+      for (const value of item.imageUrls) {
+        addIfValid(allImages, value);
+      }
+    }
+    if (Array.isArray(item.academyImages)) {
+      for (const value of item.academyImages) {
+        addIfValid(allImages, value);
+      }
+    }
+
+    const firstGroundImage = allImages[0] || '';
     const legacyImage = typeof item.image === 'string' ? item.image : '';
     const lightweightImage = firstGroundImage
       || (legacyImage.startsWith('http://') || legacyImage.startsWith('https://')
@@ -265,6 +287,9 @@ exports.listAcademies = asyncHandler(async (req, res) => {
 
     return {
       ...item,
+      groundImages: allImages,
+      imageUrls: allImages,
+      academyImages: allImages,
       image: legacyImage || firstGroundImage || lightweightImage,
     };
   });
